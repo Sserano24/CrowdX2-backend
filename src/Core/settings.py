@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     'ninja_jwt',
     #internal
     'campaigns',
+    'accounts',
 
 ]
 
@@ -141,3 +142,5 @@ NNIJA_JWT = {
     'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': datetime.timedelta(hours= 12),
 }
+
+AUTH_USER_MODEL = 'accounts.User'
