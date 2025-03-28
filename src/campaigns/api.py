@@ -16,3 +16,12 @@ def list_campaigns_entries(request):
 def get_campaign_entry(request, entry_id:int):
     obj = get_object_or_404(CampaignEntry, id = entry_id)
     return obj
+
+@router.get("/me/campaigns", response=UserWithCampaignsSchema, auth=JWTAuth())
+def get_user_with_campaigns(request):
+    user = request.user
+    return {
+        "id": user.id,
+        "username": user.username,
+        "campaigns": user.campaigns.all()
+    }
