@@ -10,3 +10,11 @@ class UserCreateSchema(Schema):
 
 class UserCreatedResponse(Schema):
     message: str
+
+# accounts/schemas.py
+class UserSchema(Schema):
+    id: int
+    username: str
+    email: str | None = None
+    first_name: str
+    last_name: str

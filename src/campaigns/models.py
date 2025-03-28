@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
+from Core import settings
 
 # Create your models here.
  
@@ -13,5 +14,12 @@ class CampaignEntry(models.Model):
     end_date = models.DateTimeField(null=True, blank=True)  # End date (optional)
     #status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")  # Campaign status
     #creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="campaigns")  # User who created the campaign
+    creator = models.ForeignKey(
+    settings.AUTH_USER_MODEL,
+    on_delete=models.CASCADE,
+    related_name="campaigns",
+    null=True,  # ✅ allow NULL for existing rows
+    blank=True
+)
     created_at = models.DateTimeField(auto_now_add=True)  # Timestamp when created
     updated_at = models.DateTimeField(auto_now=True)  # Timestamp when updated
