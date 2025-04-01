@@ -8,6 +8,7 @@ api = NinjaExtraAPI()
 api.register_controllers(NinjaJWTDefaultController)
 api.add_router("/campaigns/", "campaigns.api.router")
 api.add_router("/accounts/", "accounts.api.router")
+api.add_router("/payments/", "payments.api.router")
 
 
 class UserSchema(Schema):

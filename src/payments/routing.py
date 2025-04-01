@@ -1,9 +1,9 @@
- # payments/routing.py
+# src/payments/routing.py
 from django.urls import re_path
-from .consumers import PaymentStatusConsumer
+from payments.consumers import CampaignConsumer
 
 websocket_urlpatterns = [
-    re_path(r'^ws/payment-status/$', PaymentStatusConsumer.as_asgi()),
+    re_path(r'ws/campaigns/(?P<campaign_id>\d+)/$', CampaignConsumer.as_asgi()),
 ]
 
 
