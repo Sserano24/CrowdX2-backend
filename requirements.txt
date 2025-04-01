@@ -4,4 +4,7 @@ django-ninja
 django-ninja-jwt[crypto]
 pydantic[email]
 rav
-npm install @heroicons/react
+djangorestframework 
+channels 
+stripe 
+psycopg2-binary
