@@ -37,6 +37,8 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
+    'daphne',
     #third party
     'corsheaders',
     'ninja_extra',
@@ -44,6 +46,7 @@ INSTALLED_APPS = [
     #internal
     'campaigns',
     'accounts',
+    'payments'
 
 ]
 
@@ -83,8 +86,16 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'Core.wsgi.application'
+ASGI_APPLICATION = 'Core.asgi.application'
 
+STRIPE_PUBLISHABLE_KEY = "pk_test_51Qwj0jJQi9P7510EUj7bfyvwKCfFmlhsRojN1WVDFIiBDVOr6dtgMwAszEa4vIbRjsGEpNsNJIBXqoihGzxNz6E3007Aq3n59B"
+STRIPE_SECRET_KEY = "sk_test_51Qwj0jJQi9P7510Eto6reuvr9srlwS9qKmlnoBdFg8pTGCTjw8hOxBt5J5iWRUGVVJfFBfN13qbh591iwznHwsIb00XzJngar5"
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
+}
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
