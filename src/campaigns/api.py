@@ -1,6 +1,6 @@
 from typing import List
 from ninja import Router
-#from ninja_jwt.authentication import JWTAuth
+from ninja_jwt.authentication import JWTAuth
 from django.shortcuts import get_object_or_404
 from .models import *
 from .schemas import *
@@ -19,7 +19,16 @@ def list_campaigns_entries(request):
 #     obj = get_object_or_404(CampaignEntry, id = entry_id)
 #     return obj
 
-@router.get("/me/campaigns", response=UserWithCampaignsSchema, auth=JWTAuth())
+# @router.get("/me/campaigns", response=UserWithCampaignsSchema, auth=JWTAuth())
+# def get_user_with_campaigns(request):
+#     user = request.user
+#     return {
+#         "id": user.id,
+#         "username": user.username,
+#         "campaigns": user.campaigns.all()
+#     }
+
+@router.get("/me/campaigns", response=UserWithCampaignsSchema)
 def get_user_with_campaigns(request):
     user = request.user
     return {
