@@ -17,11 +17,12 @@ Including another URLconf
 # Core/urls.py
 from payments.webhooks import stripe_webhook
 from django.contrib import admin
-from django.urls import path
+from django.urls import path, include
 from .api import api
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', api.urls),  # this exposes all sub-routers including payments
     path("webhook/stripe/", stripe_webhook),
+    path("api/payments/", include("payments.urls")),
 ]

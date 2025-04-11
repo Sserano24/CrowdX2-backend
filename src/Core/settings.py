@@ -36,9 +36,10 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
+    'daphne',
     'django.contrib.staticfiles',
     'channels',
-    'daphne',
+    
     #third party
     'corsheaders',
     'ninja_extra',
@@ -46,7 +47,7 @@ INSTALLED_APPS = [
     #internal
     'campaigns',
     'accounts',
-    'payments'
+    'payments',
 
 ]
 
