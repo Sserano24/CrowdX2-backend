@@ -4,6 +4,8 @@ from django.utils import timezone
 from Core import settings
 
 # Create your models here.
+
+
  
 class CampaignEntry(models.Model):
     title = models.CharField(max_length=255, unique=True)  # Campaign title
@@ -17,9 +19,30 @@ class CampaignEntry(models.Model):
     creator = models.ForeignKey(
     settings.AUTH_USER_MODEL,
     on_delete=models.CASCADE,
-    related_name="campaigns",
-    null=True,  # ✅ allow NULL for existing rows
+    related_name="created_entries",
+    null=True,  # ✅ Temporarily allow nulls
     blank=True
 )
     created_at = models.DateTimeField(auto_now_add=True)  # Timestamp when created
     updated_at = models.DateTimeField(auto_now=True)  # Timestamp when updated
+
+
+from django.conf import settings
+
+class Campaign(models.Model):
+    title = models.CharField(max_length=100)
+    description = models.TextField()
+    goal_amount = models.DecimalField(max_digits=10, decimal_places=2)
+    current_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    creator = models.ForeignKey(
+    settings.AUTH_USER_MODEL,
+    on_delete=models.CASCADE,
+    related_name="created_campaigns"  # changed from "campaigns"
+)
+    start_date = models.DateField(auto_now_add=True)
+    end_date = models.DateField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.title
