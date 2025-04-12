@@ -39,3 +39,16 @@ class UserWithCampaignsSchema(Schema):
     id: int
     username: str
     campaigns: List[CampaignEntryListSchema]
+
+from ninja import Schema
+from datetime import datetime
+
+class CampaignOut(Schema):
+    id: int
+    title: str
+    description: str
+    goal_amount: float
+    current_amount: float
+    created_at: datetime
+    updated_at: datetime
+    creator_id: int  # ✅ explicitly include the FK as an integer
