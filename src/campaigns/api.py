@@ -8,9 +8,9 @@ from .schemas import *
 router = Router()
 
 # Public route to list all campaign entries
-@router.get("", response=List[CampaignEntryListSchema])
+@router.get("", response=List[CampaignOut])
 def list_campaigns_entries(request):
-    return CampaignEntry.objects.all()
+    return Campaign.objects.all()
 
 @router.get("/mine", response=List[CampaignOut], auth=JWTAuth())
 def my_campaigns(request):
@@ -39,6 +39,18 @@ def my_campaigns(request):
     # Return queryset normally (we can fallback to manual list later)
     return campaigns
 
+@router.post("/create", response=CampaignOut, auth=JWTAuth())
+def create_campaign(request, payload: CampaignEntryCreateSchema):
+    # Use payload data to create a new campaign
+    campaign = Campaign.objects.create(
+        title=payload.title,
+        description=payload.description,
+        goal_amount=payload.goal_amount,
+        end_date=payload.end_date,
+        creator=request.user  # use JWT-authenticated user
+    )
+    return campaign
+
 # Optional route for user profile + campaigns
 @router.get("/me/campaigns", response=UserWithCampaignsSchema, auth=JWTAuth())
 def get_user_with_campaigns(request):
@@ -50,7 +62,7 @@ def get_user_with_campaigns(request):
     }
 
 # ✅ Dynamic route goes LAST to avoid matching '/mine' as an int
-@router.get("entry/{entry_id}/", response=CampaignEntryDetailSchema)
-def get_campaign_entry(request, entry_id: int):
-    obj = get_object_or_404(CampaignEntry, id=entry_id)
-    return obj
+@router.get("campaign/{campaign_id}/", response=CampaignOut)
+def get_campaign(request, campaign_id: int):
+    campaign = get_object_or_404(Campaign, id=campaign_id)
+    return campaign

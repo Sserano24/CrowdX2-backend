@@ -1,8 +1,9 @@
 from ninja import Router
 from django.contrib.auth import get_user_model
 from django.contrib.auth.hashers import make_password
+from ninja_jwt.authentication import JWTAuth
 from ninja.errors import HttpError
-from .schemas import UserCreateSchema, UserCreatedResponse
+from .schemas import *
 
 router = Router()
 User = get_user_model()
@@ -24,3 +25,8 @@ def signup(request, data: UserCreateSchema):
     )
 
     return {"message": "User created successfully"}
+
+
+@router.get("/me", response=UserSchema, auth=JWTAuth())
+def get_current_user(request):
+    return request.user
