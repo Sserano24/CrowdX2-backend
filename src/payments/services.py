@@ -3,7 +3,7 @@ from django.conf import settings
 
 stripe.api_key = settings.STRIPE_SECRET_KEY
 
-def create_stripe_checkout(amount: float) -> str:
+def create_stripe_checkout(amount: float, campaign_id: int) -> str:
     amount_cents = int(amount * 100)
     session = stripe.checkout.Session.create(
         payment_method_types=['card'],
@@ -18,8 +18,11 @@ def create_stripe_checkout(amount: float) -> str:
             'quantity': 1,
         }],
         mode='payment',
-        success_url='http://localhost:3000/success',
-        cancel_url='http://localhost:3000/cancel',
+        success_url=f"http://localhost:3000/success?campaign_id={campaign_id}",  # ✅ dynamic
+        cancel_url=f'http://localhost:3000/cancel?campaign_id={campaign_id}',    # ✅ dynamic
+        metadata={
+            'campaign_id': str(campaign_id)
+        }
     )
     return session.url
 
