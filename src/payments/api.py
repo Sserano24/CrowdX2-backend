@@ -6,5 +6,6 @@ router = Router()
 
 @router.post("/checkout", response=CheckoutResponse)
 def stripe_checkout(request, payload: CheckoutRequest):
-    url = create_stripe_checkout(payload.amount)
+    url = create_stripe_checkout(payload.amount, payload.campaign_id)
     return {"url": url}
+
