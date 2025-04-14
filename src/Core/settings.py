@@ -22,7 +22,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-kix2_v+ymut21s!ky@r(1$#9iat(&cwzjs9dylhvj(*8li57^5'
-
+STRIPE_WEBHOOK_SECRET = "whsec_7667f715dd78e87b0d8127fe4c75a9b1d36a1edcd5aa094bdd4de7348505309d"
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
