@@ -8,7 +8,7 @@ from .schemas import *
 router = Router()
 User = get_user_model()
 
-@router.post("/signup", response=UserCreatedResponse)
+@router.post("/signup", response=AccountSuccessfulResponse)
 def signup(request, data: UserCreateSchema):
     if User.objects.filter(username=data.username).exists():  
         raise HttpError(400, "Username already exists")
@@ -30,3 +30,13 @@ def signup(request, data: UserCreateSchema):
 @router.get("/me", response=UserSchema, auth=JWTAuth())
 def get_current_user(request):
     return request.user
+
+
+#update api
+@router.put("/update", response= AccountSuccessfulResponse, auth = JWTAuth())
+def update_profile(request, data: UserUpdateInput):
+    user = request.user
+    for attr, value in data.dict(exclude_unset=True).items():
+        setattr(user,attr,value)
+    user.save()
+    return {"message": "User updated successfully"}
