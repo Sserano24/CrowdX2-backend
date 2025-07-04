@@ -1,7 +1,7 @@
 from typing import Optional
 from ninja import Schema
 
-class UserCreateSchema(Schema):
+class registerUser(Schema):
     username: str
     email: str
     password: str
@@ -9,10 +9,11 @@ class UserCreateSchema(Schema):
     last_name: str
     phone_number: str
 
-class AccountSuccessfulResponse(Schema):
-    message: str
+class loginSchema(Schema):
+    email: str
+    password: str
 
-# accounts/schemas.py
+
 class UserSchema(Schema):
     id: int
     username: str
@@ -24,13 +25,5 @@ class UserSchema(Schema):
     wallet_address: Optional[str] = None  
     links: Optional[str] = None
 
-
-class UserUpdateInput(Schema):
-    first_name: str
-    last_name: str
-    email: str
-    bio: Optional[str]
-    wallet_address:Optional[str]
-    links:Optional[str]
-    phone:Optional[str]
-
+class AccountSuccessfulResponse(Schema):
+    message: str

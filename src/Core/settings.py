@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'ninja_extra',
     'ninja_jwt',
+    'ninja',
     #internal
     'campaigns',
     'accounts',
@@ -70,6 +71,10 @@ CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_ORIGINS = [
 
+    "http://localhost:3000",#next.js
+    "http://127.0.0.1:3000",#next.js
+]
+CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",#next.js
     "http://127.0.0.1:3000",#next.js
 ]
