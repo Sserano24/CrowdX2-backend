@@ -162,9 +162,21 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-NNIJA_JWT = {
+NINJA_JWT = {
     'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': datetime.timedelta(hours= 12),
 }
 
 AUTH_USER_MODEL = 'accounts.User'
+
+
+# celery beat schedule (e.g., in settings.py)
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "recompute-trending-every-2min": {
+        "task": "campaigns.tasks.recompute_trending_scores_task",
+        "schedule": 120.0,  # seconds
+    },
+}
+
