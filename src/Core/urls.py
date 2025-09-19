@@ -22,7 +22,7 @@ from .api import api
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', api.urls),  # this exposes all sub-routers including payments
+    path('api/', api.urls),  # this exposes all sub urls.py's
     path("webhook/stripe/", stripe_webhook),
     path("api/payments/", include("payments.urls")),
 ]

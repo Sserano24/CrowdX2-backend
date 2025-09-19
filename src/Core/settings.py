@@ -44,6 +44,7 @@ INSTALLED_APPS = [
     'corsheaders',
     'ninja_extra',
     'ninja_jwt',
+    'ninja',
     #internal
     'campaigns',
     'accounts',
@@ -70,6 +71,10 @@ CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOWED_ORIGINS = [
 
+    "http://localhost:3000",#next.js
+    "http://127.0.0.1:3000",#next.js
+]
+CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",#next.js
     "http://127.0.0.1:3000",#next.js
 ]
@@ -157,9 +162,21 @@ STATIC_URL = 'static/'
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-NNIJA_JWT = {
+NINJA_JWT = {
     'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': datetime.timedelta(hours= 12),
 }
 
 AUTH_USER_MODEL = 'accounts.User'
+
+
+# celery beat schedule (e.g., in settings.py)
+from celery.schedules import crontab
+
+CELERY_BEAT_SCHEDULE = {
+    "recompute-trending-every-2min": {
+        "task": "campaigns.tasks.recompute_trending_scores_task",
+        "schedule": 120.0,  # seconds
+    },
+}
+
