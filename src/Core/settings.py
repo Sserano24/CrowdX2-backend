@@ -12,19 +12,23 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 import datetime
 from pathlib import Path
 from corsheaders.defaults import default_headers
-
+import os
+from dotenv import load_dotenv
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+load_dotenv(BASE_DIR / ".env")
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
-BASE_DIR = Path(__file__).resolve().parent.parent
+
+MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_URL = '/media/'
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-kix2_v+ymut21s!ky@r(1$#9iat(&cwzjs9dylhvj(*8li57^5'
-STRIPE_WEBHOOK_SECRET = "whsec_7667f715dd78e87b0d8127fe4c75a9b1d36a1edcd5aa094bdd4de7348505309d"
+SECRET_KEY = os.getenv("SECRET_KEY", "")
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "")
 
 ALLOWED_HOSTS = []
 
@@ -101,8 +105,11 @@ TEMPLATES = [
 
 ASGI_APPLICATION = 'Core.asgi.application'
 
-STRIPE_PUBLISHABLE_KEY = "pk_test_51Qwj0jJQi9P7510EUj7bfyvwKCfFmlhsRojN1WVDFIiBDVOr6dtgMwAszEa4vIbRjsGEpNsNJIBXqoihGzxNz6E3007Aq3n59B"
-STRIPE_SECRET_KEY = "sk_test_51Qwj0jJQi9P7510Eto6reuvr9srlwS9qKmlnoBdFg8pTGCTjw8hOxBt5J5iWRUGVVJfFBfN13qbh591iwznHwsIb00XzJngar5"
+# STRIPE_PUBLISHABLE_KEY = "pk_test_51Qwj0jJQi9P7510EUj7bfyvwKCfFmlhsRojN1WVDFIiBDVOr6dtgMwAszEa4vIbRjsGEpNsNJIBXqoihGzxNz6E3007Aq3n59B"
+# STRIPE_SECRET_KEY = "sk_test_51Qwj0jJQi9P7510Eto6reuvr9srlwS9qKmlnoBdFg8pTGCTjw8hOxBt5J5iWRUGVVJfFBfN13qbh591iwznHwsIb00XzJngar5"
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_API_VERSION = os.getenv("STRIPE_API_VERSION", "")  # fallback
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 CHANNEL_LAYERS = {
     "default": {
@@ -170,6 +177,7 @@ NINJA_JWT = {
 AUTH_USER_MODEL = 'accounts.User'
 
 
+
 # celery beat schedule (e.g., in settings.py)
 from celery.schedules import crontab
 
@@ -179,4 +187,5 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": 120.0,  # seconds
     },
 }
+
 

@@ -34,6 +34,18 @@ class CampaignEntryListSchema(Schema):
     start_date: datetime
     end_date: datetime | None = None
     creator: UserSchema  # ✅ optional but useful
+
+class CampaignEntryCreateSchema(Schema):
+    title: str
+    description: str
+    school: Optional[str] = None
+    tags: Optional[str] = None
+    sponsored_by: Optional[str] = None
+    goal_amount: Decimal
+    end_date: Optional[str] = None   # YYYY-MM-DD
+    milestones: Optional[List[dict]] = None
+    team_members: Optional[List[int]] = None
+    
 from typing import List
 
 class UserWithCampaignsSchema(Schema):
@@ -76,7 +88,7 @@ class CampaignOut(Schema):
     goal_amount: int
     tags: List[str]
     cover_image: Optional[str]    
-    backers: int                
+    backers: int         
 
 class SearchResponse(Schema):
     items: List[CampaignOut]

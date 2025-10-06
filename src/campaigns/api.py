@@ -6,6 +6,9 @@ from django.contrib.auth import get_user_model
 from django.db.models import Sum, Q
 from django.core.paginator import Paginator
 from django.utils.timezone import now
+from django.db.models import Prefetch
+from django.utils.dateparse import parse_date
+
 
 
 from .models import *
@@ -48,17 +51,38 @@ def _csv_to_list(value: str | None) -> list[str]:
 #     # Return queryset normally (we can fallback to manual list later)
 #     return campaigns
 
-@router.post("/create", response=CampaignOut, auth=JWTAuth())
+@router.post("/createnew")
 def create_campaign(request, payload: CampaignEntryCreateSchema):
-    # Use payload data to create a new campaign
+    User = get_user_model()
+    dummy = User.objects.first()
+    # if not request.user or not request.user.is_authenticated:
+    #     from ninja.errors import HttpError
+    #     raise HttpError(401, "Authentication required")
+
+    # Parse end_date string → date
+    end_date = None
+    if payload.end_date:
+        end_date = parse_date(payload.end_date)
+
+    # Create campaign object
     campaign = Campaign.objects.create(
-        title=payload.title,
-        description=payload.description,
+        title=payload.title.strip(),
+        description=payload.description.strip(),
+        school=(payload.school or "").strip() or None,
+        tags=(payload.tags or "").strip(),
+        sponsored_by=(payload.sponsored_by or "").strip() or None,
         goal_amount=payload.goal_amount,
-        end_date=payload.end_date,
-        creator=request.user  # use JWT-authenticated user
+        end_date=end_date,
+        creator=dummy,
+        milestones=payload.milestones,
     )
-    return campaign
+
+    # Add team members if provided
+    if payload.team_members:
+        users = User.objects.filter(id__in=payload.team_members)
+        campaign.team_members.add(*users)
+
+    return {"message": "Campaign created successfully"}
 
 # Optional route for user profile + campaigns
 # @router.get("/me/campaigns", response=UserWithCampaignsSchema, auth=JWTAuth())
@@ -82,7 +106,25 @@ User = get_user_model()
 # Detailed campaign info for frontend (with JWTAuth)
 @router.get("/detail/{campaign_id}/", auth=JWTAuth())
 def campaign_detail(request, campaign_id: int):
-    c = get_object_or_404(Campaign, id=campaign_id)
+    # Pull creator/team/images efficiently
+    c = get_object_or_404(
+        Campaign.objects.select_related("creator").prefetch_related(
+            Prefetch("team_members"),
+            Prefetch("images"),  # CampaignImage FK with related_name="images"
+        ),
+        id=campaign_id,
+    )
+
+    # Build absolute URLs for all related images
+    image_urls = []
+    for img in c.images.all():
+        try:
+            if getattr(img.photo, "url", None):
+                image_urls.append(request.build_absolute_uri(img.photo.url))
+        except ValueError:
+            # file missing on disk or misconfigured MEDIA settings
+            pass
+
     return {
         "id": c.id,
         "title": c.title,
@@ -91,11 +133,7 @@ def campaign_detail(request, campaign_id: int):
         "goal_amount": float(c.goal_amount),
         "current_amount": float(c.current_amount),
         "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
-        "images": [
-            "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=1600&auto=format&fit=crop",
-            "https://images.unsplash.com/photo-1542831371-29b0f74f9713?q=80&w=1600&auto=format&fit=crop",
-            "https://images.unsplash.com/photo-1542831371-d531d36971e6?q=80&w=1600&auto=format&fit=crop",
-        ],
+        "images": image_urls,  # now from CampaignImage rows
         "creator": {
             "id": c.creator.id,
             "name": getattr(c.creator, "username", str(c.creator)),
@@ -111,6 +149,7 @@ def campaign_detail(request, campaign_id: int):
         "milestones": c.milestones if c.milestones is not None else [],
         "verified": True,
     }
+
 
 #stats for homepage
 @router.get("/stats", response=StatsOut, auth=None)
@@ -139,7 +178,6 @@ def spotlight(request):
                 "school": c.school,
                 "current_amount": float(c.current_amount),
                 "goal_amount": float(c.goal_amount),
-                # 👇 split tags into a list of strings
                 "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
             }
             for c in items
@@ -160,7 +198,15 @@ def search_campaigns(
     page: int = 1,
     page_size: int = 12,
 ):
-    qs = Campaign.objects.all()
+    qs = (
+        Campaign.objects.all()
+        .prefetch_related(
+            Prefetch(
+                "images",
+                queryset=CampaignImage.objects.only("photo").order_by("id"),
+            )
+        )
+    )
 
     # Basic text search
     if q:
@@ -168,7 +214,7 @@ def search_campaigns(
             Q(title__icontains=q)
             | Q(description__icontains=q)
             | Q(school__icontains=q)
-            | Q(tags__icontains=q)  # adjust if tags is ArrayField
+            | Q(tags__icontains=q)
         )
 
     if tags:
@@ -190,16 +236,22 @@ def search_campaigns(
     elif sort == "funded":
         qs = qs.order_by("-current_amount")
     elif sort == "trending":
-        qs = qs.order_by("-trending_score") 
-
-    
+        qs = qs.order_by("-trending_score")
 
     paginator = Paginator(qs, page_size)
     page_obj = paginator.get_page(page)
 
     items = []
     for c in page_obj.object_list:
-        # Compute days left based on end_date
+        # first related image (prefetched)
+        cover_url = None
+        first_img = next(iter(c.images.all()), None)
+        if first_img and getattr(first_img, "photo", None):
+            url = first_img.photo.url
+            # if storage returns absolute URL (e.g., S3), use as-is
+            cover_url = url if url.startswith(("http://", "https://")) else request.build_absolute_uri(url)
+
+        # days left
         days_left = 0
         if c.end_date:
             delta = (c.end_date - now().date()).days
@@ -213,12 +265,10 @@ def search_campaigns(
             "current_amount": c.current_amount,
             "goal_amount": c.goal_amount,
             "tags": _csv_to_list(c.tags) or [],
-            "cover_image": getattr(c, "cover_image", None),  
-            "backers": getattr(c, "backers", 0),            
+            "cover_image": cover_url,   
+            "backers": getattr(c, "backers", 0),
             "days_left": days_left,
         })
-    print("school param:", repr(school))
-    print("Query:", str(qs.query))
 
     return {
         "items": items,

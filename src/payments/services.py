@@ -41,3 +41,42 @@ def broadcast_campaign_update(campaign_id: int, data: dict):
             'data': data
         }
     )
+
+
+from django.db import transaction
+from django.urls import reverse
+from django.conf import settings
+from .stripe_client import stripe
+from .models import StripeConnectedAccount
+
+@transaction.atomic
+def get_or_create_connect_account(user, email: str | None = None) -> StripeConnectedAccount:
+    acct = StripeConnectedAccount.objects.filter(user=user).first()
+    if acct:
+        return acct
+
+    account = stripe.Account.create(
+        country="US",
+        email=email or getattr(user, "email", None),
+        controller={
+            "fees": {"payer": "application"},          # your platform pays fees
+            "losses": {"payments": "application"},
+            "stripe_dashboard": {"type": "express"},   # Express accounts
+        },
+    )
+    return StripeConnectedAccount.objects.create(
+        user=user, account_id=account["id"],
+        details_submitted=account.get("details_submitted", False),
+        payouts_enabled=account.get("payouts_enabled", False),
+    )
+
+def create_onboarding_link(account_id: str, request) -> str:
+    refresh_url = request.build_absolute_uri(reverse("stripe-onboard-refresh"))
+    return_url  = request.build_absolute_uri(reverse("stripe-onboard-return"))
+    link = stripe.AccountLink.create(
+        account=account_id,
+        refresh_url=refresh_url,
+        return_url=return_url,
+        type="account_onboarding",
+    )
+    return link["url"]

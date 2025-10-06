@@ -114,3 +114,14 @@ class Campaign(models.Model):
 
     def __str__(self):
         return self.title
+    
+class CampaignImage(models.Model):
+    campaign = models.ForeignKey(
+        Campaign,
+        related_name="images",  # lets you call c.images.all()
+        on_delete=models.CASCADE
+    )
+    photo = models.ImageField(upload_to="campaign_images/")
+
+    def __str__(self):
+        return f"Image for {self.campaign.title}"

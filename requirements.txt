@@ -9,5 +9,3 @@ channels
 stripe 
 psycopg2-binary
 daphne
-celery
-django-celery-beat
