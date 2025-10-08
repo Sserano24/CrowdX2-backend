@@ -7,11 +7,15 @@ env:
   DJANGO_SETTINGS_MODULE: "Core.settings"
 
 build:
+  # Install dependencies and prep static/migrations
   - pip install -r requirements.txt
   - python src/manage.py collectstatic --noinput
   - python src/manage.py migrate
 
-server: |
-  export PORT="${PORT:-8000}"
-  cd src
-  exec gunicorn Core.wsgi:application --bind 0.0.0.0:$PORT
+scripts:
+  server: |
+    # Use Render's assigned port, fallback to 8000 for local
+    export PORT="${PORT:-8000}"
+    cd src
+    # Run production server using gunicorn (not Django dev server)
+    exec gunicorn Core.wsgi:application --bind 0.0.0.0:$PORT
