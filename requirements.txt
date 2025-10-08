@@ -13,4 +13,5 @@ dj-database-url
 python-dotenv
 psycopg2-binary
 whitenoise
+gunicorn==22.0.0
 rav
