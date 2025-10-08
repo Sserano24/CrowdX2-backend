@@ -1,0 +1,17 @@
+# rav1.yaml
+version: "1"
+
+python: "3.13"
+
+env:
+  DJANGO_SETTINGS_MODULE: "Core.settings"
+
+build:
+  - pip install -r requirements.txt
+  - python src/manage.py collectstatic --noinput
+  - python src/manage.py migrate
+
+server: |
+  export PORT="${PORT:-8000}"
+  cd src
+  exec gunicorn Core.wsgi:application --bind 0.0.0.0:$PORT
