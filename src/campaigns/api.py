@@ -8,7 +8,7 @@ from django.core.paginator import Paginator
 from django.utils.timezone import now
 from django.db.models import Prefetch
 from django.utils.dateparse import parse_date
-
+from django.db import transaction
 
 
 from .models import *
@@ -276,3 +276,54 @@ def search_campaigns(
         "page": page_obj.number,
         "page_size": page_obj.paginator.per_page,
     }
+
+@router.post("/campaigns", response=CampaignOut)
+def create_campaign(request, payload: CampaignIn):
+    # 1) Resolve creator
+    creator = get_object_or_404(User, id=payload.creator_id)
+
+    # 2) Create Campaign
+    c = Campaign.objects.create(
+        title=payload.title,
+        description=payload.description,
+        school=payload.school,
+        tags=",".join(payload.tags) if payload.tags else "",
+        creator=creator,
+        goal_amount=payload.goal_amount,
+        # optional fields
+        end_date=payload.end_date,
+        milestones=[m.dict() for m in payload.milestones] if payload.milestones else None,
+        # other fields have defaults: current_amount, is_active, etc.
+    )
+
+    # 3) Team members (optional)
+    if payload.team_member_ids:
+        members = User.objects.filter(id__in=payload.team_member_ids)
+        c.team_members.set(members)
+
+    return CampaignOut.from_model(c)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

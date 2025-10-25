@@ -110,13 +110,37 @@ CHANNEL_LAYERS = {
 }
 
 # === Database ===
-DATABASES = {
-    "default": dj_database_url.parse(
-        os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR/'db.sqlite3'}"),
-        conn_max_age=600,
-        ssl_require=False,
-    )
-}
+def mssqlize(cfg: dict) -> dict:
+    # dj-database-url doesn't always pick mssql-django's engine
+    cfg["ENGINE"] = "mssql"
+    opts = cfg.get("OPTIONS", {})
+    opts.setdefault("driver", "ODBC Driver 18 for SQL Server")
+    opts.setdefault("encrypt", True)
+    opts.setdefault("trust_server_certificate", False)
+    cfg["OPTIONS"] = opts
+    return cfg
+
+DATABASES = {}
+
+if os.getenv("DATABASE_URL"):
+    # Preferred: one env var
+    cfg = dj_database_url.parse(os.getenv("DATABASE_URL"), conn_max_age=600, ssl_require=True)
+    DATABASES["default"] = mssqlize(cfg)
+else:
+    # Fallback: many env vars (what you have today)
+    DATABASES["default"] = {
+        "ENGINE": "mssql",
+        "NAME": os.getenv("DB_NAME"),
+        "USER": os.getenv("DB_USER"),
+        "PASSWORD": os.getenv("DB_PASSWORD"),
+        "HOST": os.getenv("DB_HOST"),
+        "PORT": os.getenv("DB_PORT", "1433"),
+        "OPTIONS": {
+            "driver": "ODBC Driver 18 for SQL Server",
+            "encrypt": os.getenv("DB_ENCRYPT", "true").lower() == "true",
+            "trust_server_certificate": os.getenv("DB_TRUST_SERVER_CERT", "false").lower() == "true",
+        },
+    }
 
 # === Password validation ===
 AUTH_PASSWORD_VALIDATORS = [

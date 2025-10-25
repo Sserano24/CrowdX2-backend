@@ -1,30 +1,27 @@
 from django.db import models
 from django.contrib.auth import get_user_model
 from django.utils import timezone
-from Core import settings
-
+from django.conf import settings
 # Create your models here.
 
 
  
-class CampaignEntry(models.Model):
-    title = models.CharField(max_length=255, unique=True)  # Campaign title
-    description = models.TextField()  # Detailed campaign description
-    goal_amount = models.DecimalField(max_digits=10, decimal_places=2)  # Campaign goal (if fundraising)
-    current_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)  # Amount raised
-    start_date = models.DateTimeField(default=timezone.now)  # Start date
-    end_date = models.DateTimeField(null=True, blank=True)  # End date (optional)
-    #status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")  # Campaign status
-    #creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="campaigns")  # User who created the campaign
-    creator = models.ForeignKey(
-    settings.AUTH_USER_MODEL,
-    on_delete=models.CASCADE,
-    related_name="created_entries",
-    null=True,  # ✅ Temporarily allow nulls
-    blank=True
-)
-    created_at = models.DateTimeField(auto_now_add=True)  # Timestamp when created
-    updated_at = models.DateTimeField(auto_now=True)  # Timestamp when updated
+# class CampaignEntry(models.Model):
+#     title = models.CharField(max_length=255, unique=True)  # Campaign title
+#     description = models.TextField()  # Detailed campaign description
+#     goal_amount = models.DecimalField(max_digits=10, decimal_places=2)  # Campaign goal (if fundraising)
+#     current_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0.00)  # Amount raised
+#     start_date = models.DateTimeField(default=timezone.now)  # Start date
+#     end_date = models.DateTimeField(null=True, blank=True)  # End date (optional)
+#     #status = models.CharField(max_length=20, choices=STATUS_CHOICES, default="draft")  # Campaign status
+#     #creator = models.ForeignKey(User, on_delete=models.CASCADE, related_name="campaigns")  # User who created the campaign
+#     creator = models.ForeignKey("accounts.Creator", on_delete=models.CASCADE, related_name="campaigns")
+#     created_at = models.DateTimeField(auto_now_add=True)  # Timestamp when created
+#     updated_at = models.DateTimeField(auto_now=True)  # Timestamp when updated
+def campaign_image_upload_to(instance, filename):
+    # stored as: media/campaign_images/<campaign_id>/<filename>
+    return f"campaign_images/{instance.campaign_id}/{filename}"
+
 
 class Campaign(models.Model):
     """A crowdfunding campaign created by a student or team."""
@@ -48,9 +45,9 @@ class Campaign(models.Model):
     creator = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
-        related_name="created_campaigns",
-        help_text="The primary user who created the campaign",
+        related_name="campaigns",
     )
+
     team_members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         related_name="campaign_teams",
@@ -121,7 +118,7 @@ class CampaignImage(models.Model):
         related_name="images",  # lets you call c.images.all()
         on_delete=models.CASCADE
     )
-    photo = models.ImageField(upload_to="campaign_images/")
+    photo = models.ImageField(upload_to=campaign_image_upload_to)
 
     def __str__(self):
         return f"Image for {self.campaign.title}"

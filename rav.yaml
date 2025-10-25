@@ -9,11 +9,21 @@ env:
   PYTHONUNBUFFERED: "1"
 
 commands:
-  server: cd src && python manage.py runserver 8001
-  migrate: cd src && python manage.py migrate
-  makemigrations: cd src && python manage.py makemigrations
-  createsuperuser: cd src && python manage.py createsuperuser
+  # server: cd src && python manage.py runserver 8001
+  # migrate: cd src && python manage.py migrate
+  # makemigrations: cd src && python manage.py makemigrations
+  #createsuperuser: cd src && python manage.py createsuperuser
   shell: cd src && python manage.py shell
+
+scripts:
+  server:
+    - cd src && python manage.py runserver 8001
+  makemigrations:
+    - cd src && python manage.py makemigrations
+  migrate:
+    - cd src && python manage.py migrate
+  createsuperuser:
+    - cd src && python manage.py createsuperuser
 
 watch:
   - src

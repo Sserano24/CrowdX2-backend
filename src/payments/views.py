@@ -3,7 +3,7 @@ import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
-from campaigns.models import CampaignEntry  # ✅ update this import to your model
+# from campaigns.models import CampaignEntry  # ✅ update this import to your model
 
 
 stripe.api_key = settings.STRIPE_SECRET_KEY

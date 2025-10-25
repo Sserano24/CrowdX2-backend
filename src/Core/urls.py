@@ -2,14 +2,14 @@
 from payments.webhooks import stripe_webhook
 from django.contrib import admin
 from django.urls import path, include
-# from .api import api  # TEMP disabled to bypass pydantic/ninja_jwt crash
+from .api import api  # TEMP disabled to bypass pydantic/ninja_jwt crash
 
 from django.conf import settings
 from django.conf.urls.static import static
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    # path("api/", api.urls),  # TEMP disabled
+    path("api/", api.urls),  # TEMP disabled
     path("webhook/stripe/", stripe_webhook),
     path("api/payments/", include("payments.urls")),
 ]
