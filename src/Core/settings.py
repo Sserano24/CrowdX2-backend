@@ -22,7 +22,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-kix2_v+ymut21s!ky@r(1$#9iat(&cwzjs9dylhvj(*8li57^5'
-STRIPE_WEBHOOK_SECRET = "whsec_7667f715dd78e87b0d8127fe4c75a9b1d36a1edcd5aa094bdd4de7348505309d"
+PAYPAL_CLIENT_ID = "Aevf0289ORb3CyM9H7vzI10yv36RjUaulVe0ehOOw_tSSl44y4aPXa2YWqWoQ91yqkO2gQ1IL_ceU8_m"
+PAYPAL_CLIENT_SECRET = "ECCKU_EYNbtTiogpkb28AlYASJvQb6Z6qqxU7X4A0OaNpbIIO6IKn48kMYgcmpRC6iQ38eq9k86lMyT6"
+PAYPAL_MODE = "sandbox"  
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -100,9 +102,6 @@ TEMPLATES = [
 ]
 
 ASGI_APPLICATION = 'Core.asgi.application'
-
-STRIPE_PUBLISHABLE_KEY = "pk_test_51Qwj0jJQi9P7510EUj7bfyvwKCfFmlhsRojN1WVDFIiBDVOr6dtgMwAszEa4vIbRjsGEpNsNJIBXqoihGzxNz6E3007Aq3n59B"
-STRIPE_SECRET_KEY = "sk_test_51Qwj0jJQi9P7510Eto6reuvr9srlwS9qKmlnoBdFg8pTGCTjw8hOxBt5J5iWRUGVVJfFBfN13qbh591iwznHwsIb00XzJngar5"
 
 CHANNEL_LAYERS = {
     "default": {

@@ -15,7 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 # Core/urls.py
-from payments.webhooks import stripe_webhook
+from payments.webhooks import paypal_webhook
 from django.contrib import admin
 from django.urls import path, include
 from .api import api
@@ -23,6 +23,6 @@ from .api import api
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', api.urls),  # this exposes all sub urls.py's
-    path("webhook/stripe/", stripe_webhook),
+    path("api/payments/webhook/", paypal_webhook, name="paypal-webhook"),
     path("api/payments/", include("payments.urls")),
 ]

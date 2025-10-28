@@ -1,45 +1,51 @@
-import stripe
 import json
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.conf import settings
-from campaigns.models import CampaignEntry  # ✅ update this import to your model
+import paypalrestsdk
+from campaigns.models import Campaign
 
+# Configure PayPal
+paypalrestsdk.configure({
+    "mode": settings.PAYPAL_MODE,  # "sandbox" or "live"
+    "client_id": settings.PAYPAL_CLIENT_ID,
+    "client_secret": settings.PAYPAL_CLIENT_SECRET,
+})
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
+@csrf_exempt
+def create_paypal_order(request):
+    if request.method != 'POST':
+        return JsonResponse({'error': 'POST required'}, status=405)
 
-@csrf_exempt  # for now — only during testing
-def create_checkout_session(request):
-    if request.method == 'POST':
-        try:
-            data = json.loads(request.body)
-            amount = int(float(data.get('amount', 0)) * 100)  # convert dollars to cents
-            campaign_id = data.get('campaign_id')
+    try:
+        data = json.loads(request.body)
+        amount = float(data.get('amount', 0))
+        campaign_id = data.get('campaign_id')
 
-            # ✅ 1. Get the campaign name
-            campaign = CampaignEntry.objects.get(id=campaign_id)
-            campaign_name = campaign.title
+        campaign = Campaign.objects.get(id=campaign_id)
 
+        payment = paypalrestsdk.Payment({
+            "intent": "sale",
+            "payer": {"payment_method": "paypal"},
+            "redirect_urls": {
+                "return_url": f"http://localhost:3000/success?campaign_id={campaign_id}",
+                "cancel_url": f"http://localhost:3000/campaigns/{campaign_id}",
+            },
+            "transactions": [{
+                "amount": {"total": f"{amount:.2f}", "currency": "USD"},
+                "description": f"Donation to {campaign.title}",
+            }],
+        })
 
+        if payment.create():
+            for link in payment.links:
+                if link.rel == "approval_url":
+                    return JsonResponse({"url": link.href})
+            return JsonResponse({'error': 'No approval URL found'}, status=400)
+        else:
+            return JsonResponse({'error': payment.error}, status=400)
 
-            session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
-                line_items=[{
-                    'price_data': {
-                        'currency': 'usd',
-                        'unit_amount': amount,
-                        'product_data': {
-                            'name': f'Donation to {campaign_name}',  # ✅ dynamic title
-                        },
-                    },
-                    'quantity': 1,
-                }],
-                mode='payment',
-                success_url='http://localhost:3000/success',
-                cancel_url=f'http://localhost:3000/campaigns/{campaign_id}',
-                metadata={'campaign_id': campaign_id},
-            )
-
-            return JsonResponse({'url': session.url})
-        except Exception as e:
-            return JsonResponse({'error': str(e)}, status=400)
+    except Campaign.DoesNotExist:
+        return JsonResponse({'error': 'Campaign not found'}, status=404)
+    except Exception as e:
+        return JsonResponse({'error': str(e)}, status=500)
