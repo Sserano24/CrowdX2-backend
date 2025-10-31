@@ -2,6 +2,7 @@ from typing import Optional, List, Literal
 from ninja import Schema
 from typing import List
 from decimal import Decimal
+from pydantic import BaseModel, AnyUrl
 
 
 UserType = Literal["student", "professional"]
@@ -27,7 +28,7 @@ class UserBase(Schema):
     last_name: str
     phone_number: Optional[str] = None
     bio: Optional[str] = None
-    links: Optional[str] = None
+    link: Optional[str] = None
     wallet_address: Optional[str] = None
     user_type: UserType
 
@@ -47,18 +48,18 @@ class UserUpdate(Schema):
     wallet_address: Optional[str] = None
     blurb: Optional[str] = None
 
-class StudentProfileOut(Schema):
-    school: Optional[str] = None
+class StudentProfileOut(BaseModel):
+    school: str
     major: Optional[str] = None
     graduation_year: Optional[int] = None
-    gpa: Optional[Decimal] = None
-    portfolio_url: Optional[str] = None
+    gpa: Optional[float] = None
+    portfolio_url: Optional[AnyUrl] = None
 
-class ProfessionalProfileOut(Schema):
-    company: Optional[str] = None
+class ProfessionalProfileOut(BaseModel):
+    company: str
     title: Optional[str] = None
-    linkedin_url: Optional[str] = None
-    hiring: Optional[bool] = None
+    linkedin_url: Optional[AnyUrl] = None
+    hiring: bool = False
     interests: Optional[str] = None
 
 
@@ -66,12 +67,26 @@ class ProjectMini(Schema):
     id: int
     title: str
 
-class UserOut(Schema):
+class UserOut(BaseModel):
     id: int
-    name: str
-    profile_picture: str
+    email: str
+    username: str
+    first_name: str
+    last_name: str
+    # add these with defaults:
+    name: Optional[str] = None
+    profile_picture: Optional[AnyUrl] = None
+    associated_projects: List[str] = []  # or List[ProjectOut] = []
+    phone_number: Optional[str] = None
+    bio: Optional[str] = None
+    link: Optional[AnyUrl] = None
+    wallet_address: Optional[str] = None
+    user_type: str
     blurb: Optional[str] = None
-    associated_projects: List[ProjectMini]
+    is_email_verified: bool = False
+
+    student: Optional[StudentProfileOut] = None
+    professional: Optional[ProfessionalProfileOut] = None
     
 class AccountSuccessfulResponse(Schema):
     message: str

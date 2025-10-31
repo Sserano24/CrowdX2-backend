@@ -15,9 +15,10 @@ from ninja_extra import NinjaExtraAPI  # or from ninja import NinjaAPI (pick ONE
 from campaigns.api import router as campaigns_router
 from accounts.api import router as accounts_router
 from payments.api import router as payments_router
+from ninja_jwt.controller import NinjaJWTDefaultController
 
 api = NinjaExtraAPI(version="1.0.0")  # or NinjaAPI, just be consistent
-
+api.register_controllers(NinjaJWTDefaultController)
 api.add_router("/campaigns", campaigns_router)
 api.add_router("/accounts", accounts_router)
 api.add_router("/payments", payments_router)

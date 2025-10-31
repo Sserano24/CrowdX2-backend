@@ -51,39 +51,6 @@ def _csv_to_list(value: str | None) -> list[str]:
 #     # Return queryset normally (we can fallback to manual list later)
 #     return campaigns
 
-@router.post("/createnew")
-def create_campaign(request, payload: CampaignEntryCreateSchema):
-    User = get_user_model()
-    dummy = User.objects.first()
-    # if not request.user or not request.user.is_authenticated:
-    #     from ninja.errors import HttpError
-    #     raise HttpError(401, "Authentication required")
-
-    # Parse end_date string → date
-    end_date = None
-    if payload.end_date:
-        end_date = parse_date(payload.end_date)
-
-    # Create campaign object
-    campaign = Campaign.objects.create(
-        title=payload.title.strip(),
-        description=payload.description.strip(),
-        school=(payload.school or "").strip() or None,
-        tags=(payload.tags or "").strip(),
-        sponsored_by=(payload.sponsored_by or "").strip() or None,
-        goal_amount=payload.goal_amount,
-        end_date=end_date,
-        creator=dummy,
-        milestones=payload.milestones,
-    )
-
-    # Add team members if provided
-    if payload.team_members:
-        users = User.objects.filter(id__in=payload.team_members)
-        campaign.team_members.add(*users)
-
-    return {"message": "Campaign created successfully"}
-
 # Optional route for user profile + campaigns
 # @router.get("/me/campaigns", response=UserWithCampaignsSchema, auth=JWTAuth())
 # def get_user_with_campaigns(request):
@@ -277,32 +244,11 @@ def search_campaigns(
         "page_size": page_obj.paginator.per_page,
     }
 
-@router.post("/campaigns", response=CampaignOut)
-def create_campaign(request, payload: CampaignIn):
-    # 1) Resolve creator
-    creator = get_object_or_404(User, id=payload.creator_id)
-
-    # 2) Create Campaign
-    c = Campaign.objects.create(
-        title=payload.title,
-        description=payload.description,
-        school=payload.school,
-        tags=",".join(payload.tags) if payload.tags else "",
-        creator=creator,
-        goal_amount=payload.goal_amount,
-        # optional fields
-        end_date=payload.end_date,
-        milestones=[m.dict() for m in payload.milestones] if payload.milestones else None,
-        # other fields have defaults: current_amount, is_active, etc.
-    )
-
-    # 3) Team members (optional)
-    if payload.team_member_ids:
-        members = User.objects.filter(id__in=payload.team_member_ids)
-        c.team_members.set(members)
-
-    return CampaignOut.from_model(c)
-
+@router.get("/student_campaigns/{id}")
+def student_campaigns(request, id: int):
+    """Return all active campaigns for a student (public)."""
+    qs = Campaign.objects.filter(creator_id=id, is_active=True).order_by("-created_at")
+    return [c.to_card_dict() for c in qs]
 
 
 
