@@ -166,23 +166,56 @@ def get_spotlight_users(request):
         for u in users
     ]
 
-@router.get("/student/{id}", auth=JWTAuth())
-def get_student_dashboard(request, id: int):
-    """Return a student profile; requires valid JWT token."""
-    student = get_object_or_404(User, id=id)
-    if request.user.id != student.id:
-        creator = 1
+@router.get("/profile/{id}", auth=JWTAuth())
+def get_user_profile(request, id: int):
+    """Return a profile; requires valid JWT token."""
+    user = get_object_or_404(User, id=id)
 
+    # Base info (shared by all user types)
     data = {
-        "id": student.id,
-        "email": student.email,
-        "username": student.username,
-        "first_name": student.first_name,
-        "last_name": student.last_name,
-        "profile_url": getattr(student, "profile_url", None),
-        "bio": getattr(student, "bio", ""),
-        "user_type": student.user_type,
-        "student": getattr(student, "student", None),
-        "github": getattr(student, "github", None),
+        "id": user.id,
+        "username": user.username,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "email": user.email,
+        "bio": user.bio,
+        "user_type": user.user_type,
+        "wallet_address": user.wallet_address,
+        "link": user.link,
+        "is_email_verified": user.is_email_verified,
+        "user_score": user.user_score,
     }
+
+    # Add fields depending on user type
+    if user.user_type == "student":
+        profile = getattr(user, "student_profile", None)
+        data.update({
+            "school": getattr(profile, "school", None),
+            "school_color_0": getattr(profile, "school_color_0", None),
+            "school_color_1": getattr(profile, "school_color_1", None),
+            "major": getattr(profile, "major", None),
+            "graduation_year": getattr(profile, "graduation_year", None),
+            "gpa": getattr(profile, "gpa", None),
+            "linkedin": getattr(profile, "linkedin", None),
+            "github": getattr(profile, "github", None),
+            "active_project_count": getattr(profile, "active_project_count", None),
+            "total_funds_raised": getattr(profile, "total_funds_raised", None),
+            "co_creator_count": getattr(profile, "co_creator_count", None),
+
+        })
+
+    elif user.user_type == "professional":
+        # Example — customize with your ProfessionalProfile model fields
+        profile = getattr(user, "professional_profile", None)
+        data.update({
+            "company": getattr(profile, "company", None),
+            "title": getattr(profile, "title", None),
+            "linkedin": getattr(profile, "linkedin", None),
+            "hiring": getattr(profile, "hiring", None),
+            "interests": getattr(profile, "interests", None),
+        })
+
+    # Optional: include creator flag if viewing another profile
+    data["is_creator_viewing"] = request.user.id != user.id
+
     return data

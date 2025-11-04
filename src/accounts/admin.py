@@ -11,7 +11,7 @@ class StudentProfileInline(admin.StackedInline):
     fk_name = "user"
     extra = 0
     can_delete = False
-    fields = ("school", "major", "graduation_year", "gpa", "portfolio_url")
+    fields = ("school","school_color_0","school_color_1", "major", "graduation_year", "gpa", "linkedin", "github", "active_project_count", "total_funds_raised", "co_creator_count")
 
 
 class ProfessionalProfileInline(admin.StackedInline):
@@ -19,7 +19,7 @@ class ProfessionalProfileInline(admin.StackedInline):
     fk_name = "user"
     extra = 0
     can_delete = False
-    fields = ("company", "title", "linkedin_url", "hiring", "interests")
+    fields = ("company", "title", "linkedin", "hiring", "interests")
 
 
 # ---- User Admin ------------------------------------------------------------

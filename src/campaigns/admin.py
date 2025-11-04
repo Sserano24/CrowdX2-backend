@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Campaign, CampaignImage
+from .models import Campaign, CampaignImage,CampaignMilestone
 
 
 class CampaignImageInline(admin.TabularInline):  # or admin.StackedInline
@@ -15,10 +15,17 @@ class CampaignImageInline(admin.TabularInline):  # or admin.StackedInline
         return "—"
     thumbnail.short_description = "Preview"
 
+class CampaignMilestoneInline(admin.TabularInline):
+    model = CampaignMilestone
+    extra = 1
+    fields = ("title", "summary", "done")
+    show_change_link = True
+
 
 @admin.register(Campaign)
 class CampaignAdmin(admin.ModelAdmin):
     list_display = (
+        "id",
         "title",
         "goal_amount_formatted",
         "current_amount_formatted",

@@ -16,7 +16,6 @@ class User(AbstractUser):
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username" , "first_name", "last_name", "phone_number"]
 
-
     username = models.CharField(max_length=80, unique=True)
     email = models.EmailField(unique=True)
     phone_number = models.CharField(max_length=20, blank=True, null=True)
@@ -38,11 +37,16 @@ class User(AbstractUser):
 class StudentProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="student_profile")
     school = models.CharField(max_length=255)
+    school_color_0 = models.CharField(max_length=7, blank=True, null=True)  # Hex color code
+    school_color_1 = models.CharField(max_length=7, blank=True, null=True)
     major = models.CharField(max_length=255, blank=True, null=True)
     graduation_year = models.PositiveIntegerField(blank=True, null=True)
     gpa = models.DecimalField(max_digits=3, decimal_places=2, blank=True, null=True)
-    portfolio_url = models.URLField(blank=True, null=True)
-
+    linkedin = models.URLField(blank=True, null=True)
+    github = models.URLField(blank=True, null=True)
+    active_project_count = models.PositiveIntegerField(default=0)
+    total_funds_raised = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+    co_creator_count = models.PositiveIntegerField(default=0)
     def __str__(self):
         return f"{self.user.username} - Student"
 
@@ -50,7 +54,7 @@ class ProfessionalProfile(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="professional_profile")
     company = models.CharField(max_length=255)
     title = models.CharField(max_length=255, blank=True, null=True)
-    linkedin_url = models.URLField(blank=True, null=True)
+    linkedin = models.URLField(blank=True, null=True)
     hiring = models.BooleanField(default=False)
     interests = models.CharField(max_length=255, blank=True, null=True)
 

@@ -156,3 +156,69 @@ class CampaignOut(Schema):
             start_date=c.start_date,
             end_date=c.end_date,
         )
+
+from datetime import date
+from typing import List, Optional
+from ninja import Schema
+
+
+class CreatorSchema(Schema):
+    id: int
+    name: str
+    linkedin: Optional[str] = None
+
+
+class TeamMemberSchema(Schema):
+    id: int
+    name: str
+    role: str
+    bio: str
+    linkedin: Optional[str] = None
+
+
+class MilestoneSchema(Schema):
+    title: str
+    done: bool
+    summary: str
+
+
+class ContactSchema(Schema):
+    email: str
+    github: Optional[str] = None
+    youtube: Optional[str] = None
+
+
+class CampaignSchema(Schema):
+    id: int
+    title: str
+    school: Optional[str] = None
+    one_line: str
+    project_summary: str
+
+    problem_statement: str
+    proposed_solution: str
+    technical_approach: str
+    implementation_progress: str
+    impact_and_future_work: str
+    mentorship_or_support_needs: str
+
+    goal_amount: int
+    current_amount: int
+
+    tags: List[str]
+    images: List[str]
+
+    creator: CreatorSchema
+    team_members: List[TeamMemberSchema]
+
+    is_sponsored: bool
+    sponsored_by: Optional[str] = None
+
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+    milestones: List[MilestoneSchema]
+
+    verified: bool
+    contact: ContactSchema
+    outreach_message: str

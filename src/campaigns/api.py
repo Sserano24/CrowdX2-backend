@@ -23,99 +23,142 @@ def _csv_to_list(value: str | None) -> list[str]:
     return [t.strip() for t in value.split(",") if t.strip()]
 
 
-
-# @router.get("/mine", response=List[CampaignOut], auth=JWTAuth())
-# def my_campaigns(request):
-#     print("📥 /mine endpoint hit")
-
-#     # Confirm user from JWT
-#     print("🔐 Authenticated user:", request.user)
-
-#     # Query campaigns from DB
-#     campaigns = Campaign.objects.filter(creator=request.user)
-#     print(f"🔎 Found {campaigns.count()} campaigns")
-
-#     # See raw data returned (this will help detect serialization issues)
-#     for c in campaigns:
-#         print("📦 Campaign object:", {
-#             "id": c.id,
-#             "title": c.title,
-#             "description": c.description,
-#             "goal_amount": float(c.goal_amount),
-#             "current_amount": float(c.current_amount),
-#             "creator_id": c.creator_id,
-#             "created_at": c.created_at,
-#             "updated_at": c.updated_at,
-#         })
-
-#     # Return queryset normally (we can fallback to manual list later)
-#     return campaigns
-
-# Optional route for user profile + campaigns
-# @router.get("/me/campaigns", response=UserWithCampaignsSchema, auth=JWTAuth())
-# def get_user_with_campaigns(request):
-#     user = request.user
-#     return {
-#         "id": user.id,
-#         "username": user.username,
-#         "campaigns": user.campaigns.all()
-#     }
-
-# # ✅ Dynamic route goes LAST to avoid matching '/mine' as an int
-# @router.get("campaign/{campaign_id}/", response=CampaignOut)
-# def get_campaign(request, campaign_id: int):
-#     campaign = get_object_or_404(Campaign, id=campaign_id)
-#     return campaign
-
 User = get_user_model()
 
 
 # Detailed campaign info for frontend (with JWTAuth)
-@router.get("/detail/{campaign_id}/", auth=JWTAuth())
-def campaign_detail(request, campaign_id: int):
-    # Pull creator/team/images efficiently
-    c = get_object_or_404(
-        Campaign.objects.select_related("creator").prefetch_related(
-            Prefetch("team_members"),
-            Prefetch("images"),  # CampaignImage FK with related_name="images"
+@router.get("/detailed/{campaign_id}", response=CampaignSchema, auth=JWTAuth())
+def get_campaign_detail(request, campaign_id: int):
+    """
+    Return a single campaign with full detail; requires valid JWT token.
+    Loads from the real Campaign model using campaign_id.
+    """
+
+    campaign = get_object_or_404(
+        Campaign.objects
+        .select_related("creator")  # FK to User
+        .prefetch_related(
+            "images",      # CampaignImage related_name="images"
+            "milestones",  # CampaignMilestone related_name="milestones"
+            # Only keep these if they actually exist on your model:
+            # "tags",
+            # "team_members",
         ),
         id=campaign_id,
     )
 
-    # Build absolute URLs for all related images
-    image_urls = []
-    for img in c.images.all():
-        try:
-            if getattr(img.photo, "url", None):
-                image_urls.append(request.build_absolute_uri(img.photo.url))
-        except ValueError:
-            # file missing on disk or misconfigured MEDIA settings
-            pass
+    # ----- Creator -----
+    creator_user = campaign.creator
+    creator = CreatorSchema(
+        id=creator_user.id,
+        name=(
+            creator_user.get_full_name()
+            or creator_user.username
+            or creator_user.email
+        ),
+        # adjust to whatever field you actually store linkedin in:
+        linkedin=getattr(creator_user, "linkedin", None) or getattr(creator_user, "link", None),
+    )
 
-    return {
-        "id": c.id,
-        "title": c.title,
-        "school": c.school,
-        "description": c.description,
-        "goal_amount": float(c.goal_amount),
-        "current_amount": float(c.current_amount),
-        "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
-        "images": image_urls,  # now from CampaignImage rows
-        "creator": {
-            "id": c.creator.id,
-            "name": getattr(c.creator, "username", str(c.creator)),
-        },
-        "team_members": [
-            {"id": u.id, "name": getattr(u, "username", str(u))}
-            for u in c.team_members.all()
-        ],
-        "is_sponsored": bool(c.sponsored_by),
-        "sponsored_by": c.sponsored_by,
-        "start_date": str(c.start_date),
-        "end_date": str(c.end_date) if c.end_date else None,
-        "milestones": c.milestones if c.milestones is not None else [],
-        "verified": True,
-    }
+    # ----- Team members (if you have a related model) -----
+    # Team members (ManyToMany to User)
+    if hasattr(campaign, "team_members"):
+        team_members = []
+        for tm in campaign.team_members.all():
+            # Try to get linked student profile if it exists
+            student_profile = getattr(tm, "student_profile", None)
+
+            team_members.append(
+                TeamMemberSchema(
+                    id=tm.id,
+                    # Combine first and last name if available, fallback to username or email
+                    name=(tm.get_full_name() or tm.username or tm.email),
+                    role=getattr(tm, "role", "") or "",
+                    bio=getattr(tm, "bio", "") or "",
+                    # Safely fetch linkedin from the student profile
+                    linkedin=(
+                        getattr(student_profile, "linkedin", None)
+                        or getattr(student_profile, "portfolio_url", None)
+                        or getattr(tm, "link", None)
+                    ),
+                )
+            )
+    else:
+        team_members = []
+
+
+
+    # ----- Milestones -----
+    milestones = [
+        MilestoneSchema(
+            title=m.title,
+            done=m.done,
+            summary=m.summary or "",
+        )
+        for m in campaign.milestones.all()
+    ]
+
+    # ----- Tags (if you have Tag M2M) -----
+    # Tags (safe for models with or without ManyToManyField)
+    tags = []
+    if hasattr(campaign, "tags"):
+        try:
+            tags = [getattr(t, "name", str(t)) for t in campaign.tags.all()]
+        except Exception:
+            tags = []
+
+
+    # ----- Images -----
+    # Your CampaignImage model uses "photo" (from admin code), so:
+    images = [
+        img.photo.url
+        for img in campaign.images.all()
+        if getattr(img, "photo", None) and hasattr(img.photo, "url")
+    ]
+
+    # ----- Contact info -----
+    contact = ContactSchema(
+        email=creator_user.email,
+        github=getattr(campaign, "contact_github", None),
+        youtube=getattr(campaign, "contact_youtube", None),
+    )
+
+    # ----- Build and return schema -----
+    return CampaignSchema(
+        id=campaign.id,
+        title=campaign.title,
+        school=campaign.school,
+        one_line=campaign.blurb or "",
+        project_summary=campaign.project_summary or "",
+
+        problem_statement=campaign.problem_statement or "",
+        proposed_solution=campaign.proposed_solution or "",
+        technical_approach=campaign.technical_approach or "",
+        implementation_progress=campaign.implementation_progress or "",
+        impact_and_future_work=campaign.impact_and_future_work or "",
+        mentorship_or_support_needs=campaign.mentorship_or_support_needs or "",
+
+        goal_amount=int(campaign.goal_amount or 0),
+        current_amount=int(campaign.current_amount or 0),
+
+        tags=tags,
+        images=images,
+
+        creator=creator,
+        team_members=team_members,
+
+        is_sponsored=campaign.is_sponsored,
+        sponsored_by=campaign.sponsored_by,
+
+        start_date=campaign.start_date,
+        end_date=campaign.end_date,
+
+        milestones=milestones,           # 🔥 important: include milestones here
+
+        verified=campaign.verified,
+        contact=contact,
+        outreach_message=campaign.outreach_message or "",
+    )
 
 
 #stats for homepage

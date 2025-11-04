@@ -17,6 +17,8 @@ class Campaign(models.Model):
     school_color_0 = models.CharField(max_length=32, blank=True, null=True)  # NEW
     school_color_1 = models.CharField(max_length=32, blank=True, null=True)  # NEW
 
+
+
     # --- badges ---
     verified = models.BooleanField(default=False)      # NEW
     is_sponsored = models.BooleanField(default=False)  # NEW
@@ -26,8 +28,18 @@ class Campaign(models.Model):
     cover_image = models.URLField(blank=True, null=True)  # NEW (fallback when no CampaignImage)
     # You also keep CampaignImage below
 
-    # --- text / tags ---
-    description = models.TextField()
+    # Detailed campaign description fields
+    project_summary = models.TextField(blank=True, null=True)
+    problem_statement = models.TextField(blank=True, null=True)
+    proposed_solution = models.TextField(blank=True, null=True)
+    technical_approach = models.TextField(blank=True, null=True)
+    implementation_progress = models.TextField(blank=True, null=True)
+    impact_and_future_work = models.TextField(blank=True, null=True)
+    mentorship_or_support_needs = models.TextField(blank=True, null=True)
+
+    outreach_message = models.TextField(blank=True, null=True)
+
+
     blurb = models.TextField(blank=True, null=True)  # NEW (short teaser)
     tags = models.CharField(max_length=255, blank=True, help_text="Comma-separated tags")
 
@@ -37,6 +49,17 @@ class Campaign(models.Model):
         on_delete=models.CASCADE,
         related_name="campaigns",
     )
+
+    def save(self, *args, **kwargs):
+        # If the creator is a student, copy their school info
+        if self.creator and self.creator.user_type == "student":
+            profile = getattr(self.creator, "student_profile", None)
+            if profile:
+                self.school = self.school or profile.school
+                self.school_color_0 = self.school_color_0 or getattr(profile, "school_color_0", None)
+                self.school_color_1 = self.school_color_1 or getattr(profile, "school_color_1", None)
+        super().save(*args, **kwargs)
+
     team_members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
         related_name="campaign_teams",
@@ -68,6 +91,20 @@ class Campaign(models.Model):
     def __str__(self):
         return self.title
 
+
+class CampaignMilestone(models.Model):
+    campaign = models.ForeignKey(
+        Campaign,
+        on_delete=models.CASCADE,
+        related_name="milestones",
+    )
+    title = models.CharField(max_length=255)
+    summary = models.TextField(blank=True, null=True)
+    done = models.BooleanField(default=False)
+
+    def __str__(self):
+        status = "✓" if self.done else "✗"
+        return f"{status} {self.title}"
     # -------- Derived helpers for the front-end card shape --------
     @property
     def tags_list(self):
