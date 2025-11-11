@@ -10,11 +10,11 @@ from pydantic import BaseModel, AnyUrl
 class UserType(models.TextChoices):
     STUDENT = "student", "Student"
     PROFESSIONAL = "professional", "Professional"
-    DEFAULT = "default", "Default"
+    GUEST = "guest", "Guest"
 
 class User(AbstractUser):
     USERNAME_FIELD = "email"
-    REQUIRED_FIELDS = ["username" , "first_name", "last_name", "phone_number"]
+    REQUIRED_FIELDS = ["username" , "first_name", "last_name",]
 
     username = models.CharField(max_length=80, unique=True)
     email = models.EmailField(unique=True)
@@ -24,7 +24,7 @@ class User(AbstractUser):
     link = models.URLField(blank=True, null=True)
 
     # Type - Student or Professional
-    user_type = models.CharField(max_length=20, choices=UserType.choices, default=UserType.DEFAULT,)
+    user_type = models.CharField(max_length=20, choices=UserType.choices, default=UserType.STUDENT,)
 
     # common extras
     is_email_verified = models.BooleanField(default=False)
@@ -47,6 +47,13 @@ class StudentProfile(models.Model):
     active_project_count = models.PositiveIntegerField(default=0)
     total_funds_raised = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
     co_creator_count = models.PositiveIntegerField(default=0)
+
+
+    profile_image = models.ImageField(
+        upload_to="students/profilepics/",
+        blank=True,
+        null=True
+    )
     def __str__(self):
         return f"{self.user.username} - Student"
 
@@ -57,6 +64,12 @@ class ProfessionalProfile(models.Model):
     linkedin = models.URLField(blank=True, null=True)
     hiring = models.BooleanField(default=False)
     interests = models.CharField(max_length=255, blank=True, null=True)
+
+    profile_image = models.ImageField(
+        upload_to="professionals/profilepics/",
+        blank=True,
+        null=True
+    )
 
     def __str__(self):
         return f"{self.user.username} - Professional"

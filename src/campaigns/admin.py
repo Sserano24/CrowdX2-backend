@@ -3,22 +3,27 @@ from django.utils.html import format_html
 from .models import Campaign, CampaignImage,CampaignMilestone
 
 
-class CampaignImageInline(admin.TabularInline):  # or admin.StackedInline
+class CampaignImageInline(admin.TabularInline):  # You can also use admin.StackedInline
     model = CampaignImage
-    extra = 1                      # show one empty upload row by default
-    fields = ("photo", "thumbnail")
-    readonly_fields = ("thumbnail",)
+    extra = 1
+    fields = ("image", "preview")
+    readonly_fields = ("preview",)
 
-    def thumbnail(self, obj):
-        if getattr(obj, "photo", None) and hasattr(obj.photo, "url"):
-            return format_html('<img src="{}" style="height:80px;border-radius:6px;" />', obj.photo.url)
+    def preview(self, obj):
+        """Show a thumbnail in Django admin even if hosted on Azure Blob Storage."""
+        if obj.image and hasattr(obj.image, "url"):
+            return format_html(
+                '<img src="{}" style="height:80px;border-radius:6px;object-fit:cover;" />',
+                obj.image.url
+            )
         return "—"
-    thumbnail.short_description = "Preview"
+
+    preview.short_description = "Preview"
 
 class CampaignMilestoneInline(admin.TabularInline):
     model = CampaignMilestone
     extra = 1
-    fields = ("title", "summary", "done")
+    fields = ("title", "details", "status")
     show_change_link = True
 
 
@@ -35,7 +40,7 @@ class CampaignAdmin(admin.ModelAdmin):
     )
     search_fields = ("title", "description", "creator__username")
     list_filter = ("start_date", "created_at")
-    inlines = [CampaignImageInline]   # ← show images on the Campaign page
+    inlines = [CampaignImageInline, CampaignMilestoneInline]   # ← show images on the Campaign page
 
     def goal_amount_formatted(self, obj):
         return f"${obj.goal_amount:.2f}"

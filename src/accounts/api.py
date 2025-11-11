@@ -1,20 +1,18 @@
 # accounts/api.py
 from typing import List
 from django.contrib.auth import get_user_model
-from django.db import transaction, IntegrityError
+from django.db import transaction, IntegrityError, models
 from django.shortcuts import get_object_or_404
-from ninja import Router
+from ninja import Router, Schema, File
+from ninja.files import UploadedFile
+from django.utils.text import slugify
+
+
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
+from django.core.exceptions import ObjectDoesNotExist
 
-from .schemas import (
-    UserOut,
-    UserUpdate,
-    RegisterUser,
-    StudentProfileOut,
-    ProfessionalProfileOut,
-    AccountSuccessfulResponse,
-)
+from .schemas import *
 from .models import UserType as UserTypeEnum  # enum from your models
 
 router = Router()
@@ -53,7 +51,7 @@ def user_to_out(u) -> UserOut:
             major=sp.major,
             graduation_year=sp.graduation_year,
             gpa=float(sp.gpa) if sp.gpa is not None else None,
-            portfolio_url=sp.portfolio_url or None,
+            linkedin=sp.linkedin or None,
         )
 
     if u.user_type in ("professional", getattr(UserTypeEnum, "PROFESSIONAL", "professional")) and pp:
@@ -128,7 +126,7 @@ def register(request, payload: RegisterUser):
             major=sp.major or "",
             graduation_year=sp.graduation_year,
             gpa=sp.gpa,
-            portfolio_url=sp.portfolio_url or "",
+            linkedin=sp.portfolio_url or "",
         )
     else:
         from .models import ProfessionalProfile
@@ -143,6 +141,50 @@ def register(request, payload: RegisterUser):
         )
 
     return user_to_out(u)
+
+@router.post("/me/profile-image", auth=JWTAuth(), response=ProfileImageOut)
+@transaction.atomic
+def upload_profile_image(request, file: UploadedFile = File(...)):
+    """
+    Upload or replace the current user's profile image.
+    Works for both StudentProfile and ProfessionalProfile.
+    """
+    user = request.auth  # JWTAuth puts the user here
+
+    if not user or not user.is_authenticated:
+        # Should normally be handled by JWTAuth, but just in case:
+        raise HttpError(401, "Authentication required")
+
+    # Try to find a linked StudentProfile or ProfessionalProfile
+    profile = None
+
+    # Student first
+    try:
+        profile = user.student_profile
+    except ObjectDoesNotExist:
+        profile = None
+
+    # If no student profile, try professional
+    if profile is None:
+        try:
+            profile = user.professional_profile
+        except ObjectDoesNotExist:
+            profile = None
+
+    if profile is None:
+        raise HttpError(400, "No profile found for this user")
+
+    # Assign file to the ImageField – this will upload to Azure via your default storage
+    profile.profile_image = file
+    profile.save()
+
+    # Build a URL safely
+    url = ""
+    if profile.profile_image and hasattr(profile.profile_image, "url"):
+        url = profile.profile_image.url
+
+    return ProfileImageOut(url=url)
+
 
 
 @router.get("/spotlight_users", response=List[UserOut])
@@ -219,3 +261,74 @@ def get_user_profile(request, id: int):
     data["is_creator_viewing"] = request.user.id != user.id
 
     return data
+
+@router.get("/search", response=list[UserSearchResult])
+def search_users(request, query: str = ""):
+    q = query.strip()
+    if not q:
+        return []
+
+    qs = (
+        User.objects.filter(is_active=True)
+        .filter(
+            models.Q(first_name__icontains=q)
+            | models.Q(last_name__icontains=q)
+            | models.Q(email__icontains=q)
+        )
+        .order_by("id")[:10]  # limit results
+    )
+
+    results = [
+        UserSearchResult(
+            id=user.id,
+            name=f"{user.first_name} {user.last_name}".strip() or user.email,
+            email=user.email,
+        )
+        for user in qs
+    ]
+    return results
+
+
+def make_guest_username(email: str) -> str:
+    base = slugify(email.split("@")[0]) or "guest"
+    i = 0
+    username = base
+    while User.objects.filter(username=username).exists():
+        i += 1
+        username = f"{base}{i}"
+    return username
+
+@router.post("/guest/register")
+@transaction.atomic
+def guest_register(request, payload: GuestRegisterIn):
+    user, created = User.objects.get_or_create(
+        email=payload.email,
+        defaults={
+            "username": make_guest_username(payload.email),
+            "first_name": payload.first_name or "",
+            "last_name": payload.last_name or "",
+            "user_type": UserTypeEnum.GUEST,  # ✅ now definitely the TextChoices
+        },
+    )
+
+    if created:
+        user.set_unusable_password()
+        user.save()
+
+    return {
+        "id": user.id,
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "user_type": user.user_type,
+    }
+
+@router.get("/navbar", auth=JWTAuth())
+def get_current_user(request):
+    """Return the currently authenticated user's id and type."""
+    user = request.user
+    return {
+        "id": user.id,
+        "email": user.email,
+        "user_type": user.user_type,
+    }

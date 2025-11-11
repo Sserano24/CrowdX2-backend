@@ -4,12 +4,16 @@ from django.conf import settings
 from django.utils import timezone
 from django.utils.text import slugify
 
+User = settings.AUTH_USER_MODEL
+
+
 def campaign_image_upload_to(instance, filename):
     return f"campaign_images/{instance.campaign_id}/{filename}"
 
 class Campaign(models.Model):
     # --- identifiers / display ---
-    slug = models.SlugField(unique=True, blank=True)  # NEW (for /campaigns/<slug>)
+    one_line = models.CharField(max_length=255, blank=True, null=True)  # <--- add this
+
     title = models.CharField(max_length=100)
 
     # --- school theming ---
@@ -45,7 +49,7 @@ class Campaign(models.Model):
 
     # --- ownership & team ---
     creator = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
+        User,
         on_delete=models.CASCADE,
         related_name="campaigns",
     )
@@ -60,16 +64,35 @@ class Campaign(models.Model):
                 self.school_color_1 = self.school_color_1 or getattr(profile, "school_color_1", None)
         super().save(*args, **kwargs)
 
+
     team_members = models.ManyToManyField(
         settings.AUTH_USER_MODEL,
-        related_name="campaign_teams",
+        through="CampaignTeamMember",
+        related_name="campaign_memberships",
         blank=True,
     )
 
     # --- funding ---
     goal_amount = models.DecimalField(max_digits=10, decimal_places=2)
     current_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    fiat_funding_allowed = models.BooleanField(default=False)
+    crypto_funding_allowed = models.BooleanField(default=False)
+    use_creator_fiat_payout = models.BooleanField(default=True)
+    use_creator_crypto_payout = models.BooleanField(default=True)
+    crypto_payout_address = models.CharField(
+        max_length=128,
+        blank=True,
+    )
+    fiat_payout_details = models.CharField(
+        max_length=255,
+        blank=True,
+    )
     backers = models.PositiveIntegerField(default=0)   # NEW (if you track it)
+
+    #links
+    contact_email = models.EmailField(blank=True)
+    contact_github = models.URLField(blank=True)
+    contact_youtube = models.URLField(blank=True)
 
     # --- timing ---
     start_date = models.DateField(auto_now_add=True)
@@ -98,76 +121,54 @@ class CampaignMilestone(models.Model):
         on_delete=models.CASCADE,
         related_name="milestones",
     )
+
+    # 1) Title of the milestone
     title = models.CharField(max_length=255)
-    summary = models.TextField(blank=True, null=True)
-    done = models.BooleanField(default=False)
+
+    # 2) Details / description of the milestone
+    details = models.TextField(blank=True, null=True)
+
+    # 3) Status: done / not done (rename of your `done` field)
+    status = models.BooleanField(default=False)
+
+    #4) USD Milestone Amount 
+    milestone_goal = models.DecimalField(max_digits=10, decimal_places=2, default=0)
 
     def __str__(self):
-        status = "✓" if self.done else "✗"
-        return f"{status} {self.title}"
-    # -------- Derived helpers for the front-end card shape --------
-    @property
-    def tags_list(self):
-        if not self.tags:
-            return []
-        return [t.strip() for t in self.tags.split(",") if t.strip()]
+        # icon = "✓" if self.status else "✗"
+        return f"{self.title}"
 
-    @property
-    def days_left(self) -> int:
-        if not self.end_date:
-            return 0
-        days = (self.end_date - timezone.now().date()).days
-        return max(0, days)
-
-    @property
-    def cover_image_url(self):
-        # prefer explicit cover_image, else first CampaignImage
-        if self.cover_image:
-            return self.cover_image
-        first_image = self.images.first()
-        return first_image.photo.url if first_image and first_image.photo else None
-
-    def to_card_dict(self):
-        """Return exactly what <ExploreProjectCard/> expects."""
-        return {
-            "id": self.id,
-            "slug": self.slug,
-            "title": self.title,
-            "school": self.school,
-            "school_color_0": self.school_color_0,
-            "school_color_1": self.school_color_1,
-            "verified": self.verified,
-            "is_sponsored": self.is_sponsored,
-            "sponsored_by": self.sponsored_by,
-            "cover_image": self.cover_image_url,
-            "blurb": self.blurb or self.description[:180],
-            "tags": self.tags_list,
-            "raised": float(self.current_amount or 0),
-            "goal": float(self.goal_amount or 0),
-            "backers": self.backers,
-            "days_left": self.days_left,
-            "images": [],  # if you later expose a list
-        }
-
-    def save(self, *args, **kwargs):
-        # basic auto-slug (only when creating or title changed with empty slug)
-        if not self.slug:
-            base = slugify(self.title)[:40] or "campaign"
-            candidate = base
-            idx = 2
-            while Campaign.objects.filter(slug=candidate).exclude(pk=self.pk).exists():
-                candidate = f"{base}-{idx}"
-                idx += 1
-            self.slug = candidate
-        super().save(*args, **kwargs)
 
 class CampaignImage(models.Model):
     campaign = models.ForeignKey(
         Campaign,
+        on_delete=models.CASCADE,
         related_name="images",
-        on_delete=models.CASCADE
     )
-    photo = models.ImageField(upload_to=campaign_image_upload_to)
+    image = models.ImageField(
+        upload_to="campaigns/",  
+        blank=True,
+        null=True,
+    )
+    caption = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    sort_order = models.PositiveIntegerField(default=0)
 
     def __str__(self):
-        return f"Image for {self.campaign.title}"
+        return f"{self.campaign.title} image #{self.pk}"
+    
+class CampaignTeamMember(models.Model):
+    campaign = models.ForeignKey(
+        Campaign,
+        on_delete=models.CASCADE,
+        related_name="team_member_links",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="campaign_team_links",
+    )
+    role = models.CharField(max_length=128, blank=True)
+
+    class Meta:
+        unique_together = ("campaign", "user")

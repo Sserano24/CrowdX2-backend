@@ -1,5 +1,6 @@
 from typing import List, Optional
-from ninja import Router
+from ninja import Router,File
+from ninja.files import UploadedFile
 from ninja_jwt.authentication import JWTAuth
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
@@ -10,11 +11,19 @@ from django.db.models import Prefetch
 from django.utils.dateparse import parse_date
 from django.db import transaction
 
+from ninja.errors import HttpError
+
+
 
 from .models import *
 from .schemas import *
 
 router = Router()
+
+
+
+
+
 
 def _csv_to_list(value: str | None) -> list[str]:
     if not value:
@@ -36,19 +45,18 @@ def get_campaign_detail(request, campaign_id: int):
 
     campaign = get_object_or_404(
         Campaign.objects
-        .select_related("creator")  # FK to User
+        .select_related("creator")
         .prefetch_related(
-            "images",      # CampaignImage related_name="images"
-            "milestones",  # CampaignMilestone related_name="milestones"
-            # Only keep these if they actually exist on your model:
-            # "tags",
-            # "team_members",
+            "images",          # CampaignImage related_name="images"
+            "milestones",      # CampaignMilestone related_name="milestones"
+            "team_member_links__user",  # if you use CampaignTeamMember through model
         ),
         id=campaign_id,
     )
 
     # ----- Creator -----
     creator_user = campaign.creator
+    student_profile0 = getattr(creator_user, "student_profile", None)
     creator = CreatorSchema(
         id=creator_user.id,
         name=(
@@ -56,26 +64,40 @@ def get_campaign_detail(request, campaign_id: int):
             or creator_user.username
             or creator_user.email
         ),
-        # adjust to whatever field you actually store linkedin in:
-        linkedin=getattr(creator_user, "linkedin", None) or getattr(creator_user, "link", None),
+        linkedin=getattr(student_profile0, "linkedin", None),
     )
 
-    # ----- Team members (if you have a related model) -----
-    # Team members (ManyToMany to User)
-    if hasattr(campaign, "team_members"):
-        team_members = []
-        for tm in campaign.team_members.all():
-            # Try to get linked student profile if it exists
-            student_profile = getattr(tm, "student_profile", None)
+    # ----- Team members -----
+    team_members: list[TeamMemberSchema] = []
 
+    # If you have a through model like CampaignTeamMember with related_name="team_member_links"
+    if hasattr(campaign, "team_member_links"):
+        for link in campaign.team_member_links.select_related("user").all():
+            u = link.user
+            student_profile = getattr(u, "student_profile", None)
+            team_members.append(
+                TeamMemberSchema(
+                    id=u.id,
+                    name=(u.get_full_name() or u.username or u.email),
+                    role=(link.role or ""),
+                    bio=getattr(u, "bio", "") or "",
+                    linkedin=(
+                        getattr(student_profile, "linkedin", None)
+                        or getattr(student_profile, "portfolio_url", None)
+                        or getattr(u, "link", None)
+                    ),
+                )
+            )
+    # Fallback: old-style ManyToMany directly on campaign.team_members
+    elif hasattr(campaign, "team_members"):
+        for tm in campaign.team_members.all():
+            student_profile = getattr(tm, "student_profile", None)
             team_members.append(
                 TeamMemberSchema(
                     id=tm.id,
-                    # Combine first and last name if available, fallback to username or email
                     name=(tm.get_full_name() or tm.username or tm.email),
                     role=getattr(tm, "role", "") or "",
                     bio=getattr(tm, "bio", "") or "",
-                    # Safely fetch linkedin from the student profile
                     linkedin=(
                         getattr(student_profile, "linkedin", None)
                         or getattr(student_profile, "portfolio_url", None)
@@ -83,52 +105,44 @@ def get_campaign_detail(request, campaign_id: int):
                     ),
                 )
             )
-    else:
-        team_members = []
-
-
 
     # ----- Milestones -----
     milestones = [
         MilestoneSchema(
             title=m.title,
-            done=m.done,
-            summary=m.summary or "",
+            status=m.status,
+            details=m.details or "",
         )
         for m in campaign.milestones.all()
     ]
 
-    # ----- Tags (if you have Tag M2M) -----
-    # Tags (safe for models with or without ManyToManyField)
-    tags = []
-    if hasattr(campaign, "tags"):
-        try:
-            tags = [getattr(t, "name", str(t)) for t in campaign.tags.all()]
-        except Exception:
-            tags = []
+    # ----- Tags -----
+    raw_tags = campaign.tags or ""
+    tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
 
-
-    # ----- Images -----
-    # Your CampaignImage model uses "photo" (from admin code), so:
+    # ----- Images (Azure-backed ImageField: "image") -----
     images = [
-        img.photo.url
-        for img in campaign.images.all()
-        if getattr(img, "photo", None) and hasattr(img.photo, "url")
+        CampaignImageSchema(
+            id=img.id,
+            url=img.image.url if getattr(img, "image", None) and hasattr(img.image, "url") else "",
+            caption=img.caption or "",
+        )
+        for img in campaign.images.all().order_by("sort_order", "id")
     ]
 
     # ----- Contact info -----
     contact = ContactSchema(
-        email=creator_user.email,
+        email=getattr(campaign, "contact_email", None) or creator_user.email,
         github=getattr(campaign, "contact_github", None),
         youtube=getattr(campaign, "contact_youtube", None),
     )
 
-    # ----- Build and return schema -----
+    # ----- Build and return full campaign schema -----
     return CampaignSchema(
         id=campaign.id,
         title=campaign.title,
-        school=campaign.school,
-        one_line=campaign.blurb or "",
+        school=getattr(campaign, "school", ""),
+        one_line=getattr(campaign, "one_line", "") or "",
         project_summary=campaign.project_summary or "",
 
         problem_statement=campaign.problem_statement or "",
@@ -139,10 +153,10 @@ def get_campaign_detail(request, campaign_id: int):
         mentorship_or_support_needs=campaign.mentorship_or_support_needs or "",
 
         goal_amount=int(campaign.goal_amount or 0),
-        current_amount=int(campaign.current_amount or 0),
+        current_amount=int(getattr(campaign, "current_amount", 0) or 0),
 
-        tags=tags,
-        images=images,
+        tags=tags_list,
+        images=images,                 # 👈 now a list[str], not objects
 
         creator=creator,
         team_members=team_members,
@@ -153,12 +167,117 @@ def get_campaign_detail(request, campaign_id: int):
         start_date=campaign.start_date,
         end_date=campaign.end_date,
 
-        milestones=milestones,           # 🔥 important: include milestones here
-
-        verified=campaign.verified,
+        milestones=milestones,
+        verified=getattr(campaign, "verified", False),
         contact=contact,
-        outreach_message=campaign.outreach_message or "",
+        outreach_message=getattr(campaign, "outreach_message", "") or "",
     )
+
+
+
+@router.post("/create", auth=JWTAuth())
+@transaction.atomic
+def create_campaign(request, payload: CampaignCreateSchema):
+    if not request.user or not request.user.is_authenticated:
+        raise HttpError(401, "Authentication required")
+
+    user = request.user  # This MUST be a real User, not AnonymousUser
+
+    # --- Determine final payout details ---
+    # Use creator’s stored info if the "use_creator" flags are true
+    if payload.use_creator_fiat_payout:
+        # use the creator’s saved fiat payout address
+        fiat_payout_details = getattr(user, "fiat_payout_address", "") or ""
+    else:
+        fiat_payout_details = payload.fiat_payout_details
+
+    if payload.use_creator_crypto_payout:
+        crypto_payout_address = getattr(user, "crypto_wallet_address", "") or ""
+    else:
+        crypto_payout_address = payload.crypto_payout_address
+
+    # --- Create the campaign ---
+    campaign = Campaign.objects.create(
+        creator=user,
+        title=payload.title,
+        school=getattr(user, "student_profile", None) and getattr(user.student_profile, "school", ""),
+        one_line=payload.one_line,
+        project_summary=payload.project_summary,
+        problem_statement=payload.problem_statement,
+        proposed_solution=payload.proposed_solution,
+        technical_approach=payload.technical_approach,
+        implementation_progress=payload.implementation_progress,
+        impact_and_future_work=payload.impact_and_future_work,
+        mentorship_or_support_needs=payload.mentorship_or_support_needs,
+
+        goal_amount=payload.goal_amount,
+        fiat_funding_allowed=payload.fiat_funding_allowed,
+        crypto_funding_allowed=payload.crypto_funding_allowed,
+
+        # store both the flags and the final resolved values
+        use_creator_fiat_payout=payload.use_creator_fiat_payout,
+        use_creator_crypto_payout=payload.use_creator_crypto_payout,
+        fiat_payout_details=fiat_payout_details,
+        crypto_payout_address=crypto_payout_address,
+
+        tags=payload.tags,
+        is_sponsored=payload.is_sponsored,
+        sponsored_by=payload.sponsored_by or "",
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+
+        contact_email=(payload.contact.email or "").strip(),
+        contact_github=(payload.contact.github or "").strip(),
+        contact_youtube=(payload.contact.youtube or "").strip(),
+    )
+
+    # --- Team Members ---
+    for tm in payload.team_members:
+        member = get_object_or_404(User, id=tm.id)
+        CampaignTeamMember.objects.create(
+            campaign=campaign,
+            user=member,
+            role=(tm.role or "").strip(),
+        )
+
+    # --- Milestones ---
+    for m in payload.milestones:
+        CampaignMilestone.objects.create(
+            campaign=campaign,
+            title=m.title.strip(),
+            status=m.status,
+            details=(m.details or "").strip(),
+            milestone_goal=m.milestone_goal,
+        )
+
+    return {"id": campaign.id}
+
+
+
+
+@router.post("/{campaign_id}/images/upload", auth=JWTAuth())
+def upload_campaign_image(
+    request,
+    campaign_id: int,
+    file: UploadedFile = File(...),
+):
+    campaign = get_object_or_404(Campaign, id=campaign_id)
+
+    # Optional: only allow owner
+    if campaign.creator_id != request.user.id:
+        return 403, {"detail": "Not allowed to modify this campaign"}
+
+    img = CampaignImage.objects.create(
+        campaign=campaign,
+        image=file,  # this triggers upload to Azure
+    )
+
+    return {
+        "id": img.id,
+        "url": img.image.url,  # full Azure Blob URL
+        "caption": img.caption,
+    }
+
 
 
 #stats for homepage

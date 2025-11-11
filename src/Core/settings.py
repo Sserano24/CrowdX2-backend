@@ -29,9 +29,9 @@ ALLOWED_HOSTS = csv_env(
     "localhost,127.0.0.1,crowdx.azurewebsites.net,.vercel.app",
 )
 
-# === Paths / Static & Media ===
-MEDIA_ROOT = BASE_DIR / "media"
-MEDIA_URL = "/media/"
+# # === Paths / Static & Media ===
+# MEDIA_ROOT = BASE_DIR / "media"
+# MEDIA_URL = "/media/"
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     "daphne",
     "django.contrib.staticfiles",
     "channels",
+    "storages",
 
     # third-party
     "corsheaders",
@@ -216,10 +217,16 @@ CELERY_BEAT_SCHEDULE = {
 
 # === Static files (WhiteNoise) ===
 STORAGES = {
+    "default": {
+        # Use Azure Blob Storage for all FileField / ImageField
+        "BACKEND": "storages.backends.azure_storage.AzureStorage",
+    },
     "staticfiles": {
-        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
-    }
+        # You can adjust this if you use Whitenoise or ManifestStaticFilesStorage
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
 }
+
 
 # === Security (reverse proxy/HTTPS on Azure) ===
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -231,3 +238,13 @@ if not DEBUG:
 # === Misc ===
 APPEND_SLASH = True
 X_FRAME_OPTIONS = "DENY"
+
+# === Azure Storage Blob Settings ===
+AZURE_ACCOUNT_NAME = os.getenv("AZURE_ACCOUNT_NAME")
+AZURE_ACCOUNT_KEY = os.getenv("AZURE_ACCOUNT_KEY")
+AZURE_CONTAINER = os.getenv("AZURE_CONTAINER", "media")
+
+DEFAULT_FILE_STORAGE = os.getenv("DEFAULT_FILE_STORAGE")
+
+MEDIA_URL = f"https://{AZURE_ACCOUNT_NAME}.blob.core.windows.net/{AZURE_CONTAINER}/"
+

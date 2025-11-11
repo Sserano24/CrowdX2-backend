@@ -2,7 +2,7 @@ from typing import Optional, List, Literal
 from ninja import Schema
 from typing import List
 from decimal import Decimal
-from pydantic import BaseModel, AnyUrl
+from pydantic import BaseModel, AnyUrl, EmailStr
 
 
 UserType = Literal["student", "professional"]
@@ -90,3 +90,16 @@ class UserOut(BaseModel):
     
 class AccountSuccessfulResponse(Schema):
     message: str
+
+class UserSearchResult(Schema):
+    id: int
+    name: str
+    email: str
+
+class ProfileImageOut(Schema):
+    url: str
+
+class GuestRegisterIn(Schema):
+    email: EmailStr
+    first_name: str | None = None
+    last_name: str | None = None

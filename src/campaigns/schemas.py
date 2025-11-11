@@ -4,6 +4,7 @@ from ninja import Schema
 from typing import List, Optional
 from datetime import date
 from .models import Campaign
+from pydantic import EmailStr
 
 
 
@@ -178,8 +179,9 @@ class TeamMemberSchema(Schema):
 
 class MilestoneSchema(Schema):
     title: str
-    done: bool
-    summary: str
+    details: str
+    status: bool
+    
 
 
 class ContactSchema(Schema):
@@ -187,6 +189,11 @@ class ContactSchema(Schema):
     github: Optional[str] = None
     youtube: Optional[str] = None
 
+
+class CampaignImageSchema(Schema):
+    id: int
+    url: str
+    caption: str
 
 class CampaignSchema(Schema):
     id: int
@@ -206,7 +213,7 @@ class CampaignSchema(Schema):
     current_amount: int
 
     tags: List[str]
-    images: List[str]
+    images: List[CampaignImageSchema]
 
     creator: CreatorSchema
     team_members: List[TeamMemberSchema]
@@ -222,3 +229,55 @@ class CampaignSchema(Schema):
     verified: bool
     contact: ContactSchema
     outreach_message: str
+
+class TeamMemberIn(Schema):
+    id: int
+    role: str = ""
+
+
+class MilestoneIn(Schema):
+    title: str
+    status: bool
+    details: str = ""
+    milestone_goal: Decimal
+
+
+class ContactIn(Schema):
+    email: Optional[EmailStr] = None
+    github: Optional[str] = None
+    youtube: Optional[str] = None
+
+
+class CampaignCreateSchema(Schema):
+    title: str
+    one_line: str
+    project_summary: str
+    problem_statement: str
+    proposed_solution: str
+    technical_approach: str
+    implementation_progress: str
+    impact_and_future_work: str
+    mentorship_or_support_needs: str
+
+    goal_amount: Decimal
+    fiat_funding_allowed: bool
+    crypto_funding_allowed: bool
+    use_creator_fiat_payout: bool
+    use_creator_crypto_payout: bool
+    crypto_payout_address: str
+    fiat_payout_details: str
+
+    tags: List[str]
+
+    team_members: List[TeamMemberIn] = []
+
+    is_sponsored: bool
+    sponsored_by: str
+
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+    milestones: List[MilestoneIn] = []
+
+    contact: ContactIn
+
