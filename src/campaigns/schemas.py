@@ -4,7 +4,7 @@ from ninja import Schema
 from typing import List, Optional
 from datetime import date
 from .models import Campaign
-from pydantic import EmailStr
+from pydantic import EmailStr, BaseModel
 
 
 
@@ -51,15 +51,11 @@ class CampaignEntryCreateSchema(Schema):
     milestones: Optional[List[dict]] = None
     team_members: Optional[List[int]] = None
     
-from typing import List
-
 class UserWithCampaignsSchema(Schema):
     id: int
     username: str
     campaigns: List[CampaignEntryListSchema]
 
-from ninja import Schema
-from datetime import datetime
 
 class CampaignOut(Schema):
     id: int
@@ -163,10 +159,12 @@ from typing import List, Optional
 from ninja import Schema
 
 
-class CreatorSchema(Schema):
+class CreatorSchema(BaseModel):
     id: int
     name: str
-    linkedin: Optional[str] = None
+    avatar: Optional[str]
+    major: Optional[str]
+    school: Optional[str]
 
 
 class TeamMemberSchema(Schema):
@@ -189,11 +187,11 @@ class ContactSchema(Schema):
     github: Optional[str] = None
     youtube: Optional[str] = None
 
-
 class CampaignImageSchema(Schema):
     id: int
     url: str
-    caption: str
+    caption: str = ""
+
 
 class CampaignSchema(Schema):
     id: int
@@ -213,7 +211,7 @@ class CampaignSchema(Schema):
     current_amount: int
 
     tags: List[str]
-    images: List[CampaignImageSchema]
+    images: list[CampaignImageSchema] = []
 
     creator: CreatorSchema
     team_members: List[TeamMemberSchema]
@@ -228,7 +226,6 @@ class CampaignSchema(Schema):
 
     verified: bool
     contact: ContactSchema
-    outreach_message: str
 
 class TeamMemberIn(Schema):
     id: int
@@ -243,7 +240,7 @@ class MilestoneIn(Schema):
 
 
 class ContactIn(Schema):
-    email: Optional[EmailStr] = None
+    email: EmailStr
     github: Optional[str] = None
     youtube: Optional[str] = None
 
@@ -281,3 +278,18 @@ class CampaignCreateSchema(Schema):
 
     contact: ContactIn
 
+
+
+class ProjectCardSchema(BaseModel):
+    id: int
+    title: str
+    one_line: Optional[str]
+    blurb: Optional[str]
+    cover_image: Optional[str]
+    tags: List[str] = []
+    likes: int = 0
+    views: int = 0
+    comments: int = 0
+    featured: bool = False
+    trending: bool = False
+    creator: CreatorSchema

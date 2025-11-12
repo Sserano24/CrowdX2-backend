@@ -31,6 +31,12 @@ class User(AbstractUser):
     blurb = models.CharField(max_length=160, blank=True, null=True)
     user_score = models.IntegerField(default=0)
 
+    profile_image = models.ImageField(
+        upload_to="students/profilepics/",
+        blank=True,
+        null=True
+    )
+
     def __str__(self):
         return self.email
 
@@ -49,11 +55,6 @@ class StudentProfile(models.Model):
     co_creator_count = models.PositiveIntegerField(default=0)
 
 
-    profile_image = models.ImageField(
-        upload_to="students/profilepics/",
-        blank=True,
-        null=True
-    )
     def __str__(self):
         return f"{self.user.username} - Student"
 
@@ -65,11 +66,6 @@ class ProfessionalProfile(models.Model):
     hiring = models.BooleanField(default=False)
     interests = models.CharField(max_length=255, blank=True, null=True)
 
-    profile_image = models.ImageField(
-        upload_to="professionals/profilepics/",
-        blank=True,
-        null=True
-    )
 
     def __str__(self):
         return f"{self.user.username} - Professional"

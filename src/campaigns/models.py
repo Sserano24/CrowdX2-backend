@@ -27,6 +27,11 @@ class Campaign(models.Model):
     verified = models.BooleanField(default=False)      # NEW
     is_sponsored = models.BooleanField(default=False)  # NEW
     sponsored_by = models.CharField(max_length=255, blank=True, null=True)
+    featured = models.BooleanField(default=False)      # NEW
+    likes = models.PositiveIntegerField(default=0)    # NEW
+    views = models.PositiveIntegerField(default=0)    # NEW
+    comments = models.PositiveIntegerField(default=0)  # NEW
+    trending = models.BooleanField(default=False)     # NEW
 
     # --- media ---
     cover_image = models.URLField(blank=True, null=True)  # NEW (fallback when no CampaignImage)

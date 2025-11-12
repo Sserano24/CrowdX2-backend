@@ -4,25 +4,19 @@ from ninja.files import UploadedFile
 from ninja_jwt.authentication import JWTAuth
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
-from django.db.models import Sum, Q
+from django.db.models import Sum, Q, F, FloatField, ExpressionWrapper, Value
 from django.core.paginator import Paginator
 from django.utils.timezone import now
 from django.db.models import Prefetch
 from django.utils.dateparse import parse_date
 from django.db import transaction
+from django.db.models.functions import Coalesce, NullIf
+
 
 from ninja.errors import HttpError
-
-
-
-from .models import *
 from .schemas import *
 
 router = Router()
-
-
-
-
 
 
 def _csv_to_list(value: str | None) -> list[str]:
@@ -32,147 +26,40 @@ def _csv_to_list(value: str | None) -> list[str]:
     return [t.strip() for t in value.split(",") if t.strip()]
 
 
+from .models import Campaign, CampaignImage
+
+def _abs_url(request, url: Optional[str]) -> Optional[str]:
+    if not url:
+        return None
+    return url if url.startswith(("http://", "https://")) else request.build_absolute_uri(url)
+
+
+def _image_url(request, image_field) -> str:
+    """Return absolute URL for a Django ImageField (or '' if missing)."""
+    if not image_field:
+        return ""
+    try:
+        url = image_field.url  # may raise if no file
+    except Exception:
+        return ""
+    return str(request.build_absolute_uri(url))  # ensure plain str
+
+
 User = get_user_model()
 
 
 # Detailed campaign info for frontend (with JWTAuth)
-@router.get("/detailed/{campaign_id}", response=CampaignSchema, auth=JWTAuth())
-def get_campaign_detail(request, campaign_id: int):
+def _imagefield_url(request, image_field) -> str | None:
     """
-    Return a single campaign with full detail; requires valid JWT token.
-    Loads from the real Campaign model using campaign_id.
+    Safely extract absolute URL from an ImageField/FileField (or None).
     """
-
-    campaign = get_object_or_404(
-        Campaign.objects
-        .select_related("creator")
-        .prefetch_related(
-            "images",          # CampaignImage related_name="images"
-            "milestones",      # CampaignMilestone related_name="milestones"
-            "team_member_links__user",  # if you use CampaignTeamMember through model
-        ),
-        id=campaign_id,
-    )
-
-    # ----- Creator -----
-    creator_user = campaign.creator
-    student_profile0 = getattr(creator_user, "student_profile", None)
-    creator = CreatorSchema(
-        id=creator_user.id,
-        name=(
-            creator_user.get_full_name()
-            or creator_user.username
-            or creator_user.email
-        ),
-        linkedin=getattr(student_profile0, "linkedin", None),
-    )
-
-    # ----- Team members -----
-    team_members: list[TeamMemberSchema] = []
-
-    # If you have a through model like CampaignTeamMember with related_name="team_member_links"
-    if hasattr(campaign, "team_member_links"):
-        for link in campaign.team_member_links.select_related("user").all():
-            u = link.user
-            student_profile = getattr(u, "student_profile", None)
-            team_members.append(
-                TeamMemberSchema(
-                    id=u.id,
-                    name=(u.get_full_name() or u.username or u.email),
-                    role=(link.role or ""),
-                    bio=getattr(u, "bio", "") or "",
-                    linkedin=(
-                        getattr(student_profile, "linkedin", None)
-                        or getattr(student_profile, "portfolio_url", None)
-                        or getattr(u, "link", None)
-                    ),
-                )
-            )
-    # Fallback: old-style ManyToMany directly on campaign.team_members
-    elif hasattr(campaign, "team_members"):
-        for tm in campaign.team_members.all():
-            student_profile = getattr(tm, "student_profile", None)
-            team_members.append(
-                TeamMemberSchema(
-                    id=tm.id,
-                    name=(tm.get_full_name() or tm.username or tm.email),
-                    role=getattr(tm, "role", "") or "",
-                    bio=getattr(tm, "bio", "") or "",
-                    linkedin=(
-                        getattr(student_profile, "linkedin", None)
-                        or getattr(student_profile, "portfolio_url", None)
-                        or getattr(tm, "link", None)
-                    ),
-                )
-            )
-
-    # ----- Milestones -----
-    milestones = [
-        MilestoneSchema(
-            title=m.title,
-            status=m.status,
-            details=m.details or "",
-        )
-        for m in campaign.milestones.all()
-    ]
-
-    # ----- Tags -----
-    raw_tags = campaign.tags or ""
-    tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
-
-    # ----- Images (Azure-backed ImageField: "image") -----
-    images = [
-        CampaignImageSchema(
-            id=img.id,
-            url=img.image.url if getattr(img, "image", None) and hasattr(img.image, "url") else "",
-            caption=img.caption or "",
-        )
-        for img in campaign.images.all().order_by("sort_order", "id")
-    ]
-
-    # ----- Contact info -----
-    contact = ContactSchema(
-        email=getattr(campaign, "contact_email", None) or creator_user.email,
-        github=getattr(campaign, "contact_github", None),
-        youtube=getattr(campaign, "contact_youtube", None),
-    )
-
-    # ----- Build and return full campaign schema -----
-    return CampaignSchema(
-        id=campaign.id,
-        title=campaign.title,
-        school=getattr(campaign, "school", ""),
-        one_line=getattr(campaign, "one_line", "") or "",
-        project_summary=campaign.project_summary or "",
-
-        problem_statement=campaign.problem_statement or "",
-        proposed_solution=campaign.proposed_solution or "",
-        technical_approach=campaign.technical_approach or "",
-        implementation_progress=campaign.implementation_progress or "",
-        impact_and_future_work=campaign.impact_and_future_work or "",
-        mentorship_or_support_needs=campaign.mentorship_or_support_needs or "",
-
-        goal_amount=int(campaign.goal_amount or 0),
-        current_amount=int(getattr(campaign, "current_amount", 0) or 0),
-
-        tags=tags_list,
-        images=images,                 # 👈 now a list[str], not objects
-
-        creator=creator,
-        team_members=team_members,
-
-        is_sponsored=campaign.is_sponsored,
-        sponsored_by=campaign.sponsored_by,
-
-        start_date=campaign.start_date,
-        end_date=campaign.end_date,
-
-        milestones=milestones,
-        verified=getattr(campaign, "verified", False),
-        contact=contact,
-        outreach_message=getattr(campaign, "outreach_message", "") or "",
-    )
-
+    if not image_field:
+        return None
+    try:
+        url = image_field.url
+    except Exception:
+        return None
+    return _abs_url(request, url)
 
 
 @router.post("/create", auth=JWTAuth())
@@ -253,8 +140,6 @@ def create_campaign(request, payload: CampaignCreateSchema):
     return {"id": campaign.id}
 
 
-
-
 @router.post("/{campaign_id}/images/upload", auth=JWTAuth())
 def upload_campaign_image(
     request,
@@ -277,7 +162,6 @@ def upload_campaign_image(
         "url": img.image.url,  # full Azure Blob URL
         "caption": img.caption,
     }
-
 
 
 #stats for homepage
@@ -315,40 +199,86 @@ def spotlight(request):
 # Note: recompute_trending_scores() moved to services.py
 
 
-@router.get("/search", response=SearchResponse)
+@router.get("/student_campaigns/{id}")
+def student_campaigns(request, id: int):
+    """Return all active campaigns for a student (public)."""
+    qs = Campaign.objects.filter(creator_id=id, is_active=True).order_by("-created_at")
+    return [c.to_card_dict() for c in qs]
+
+
+@router.get("/dash/myprojects", response=List[ProjectCardSchema])
+def get_projects(request):
+    """Return a list of projects formatted for ExploreProjectCard."""
+    projects = Project.objects.select_related("creator").all()
+
+    return [
+        {
+            "id": p.id,
+            "title": p.title,
+            "one_line": p.one_line_summary,
+            "blurb": p.description,
+            "cover_image": p.cover_image.url if p.cover_image else None,
+            "tags": [t.name for t in p.tags.all()] if hasattr(p, "tags") else [],
+            "likes": getattr(p, "likes", 0),
+            "views": getattr(p, "views", 0),
+            "comments": getattr(p, "comment_count", 0),
+            "featured": getattr(p, "featured", False),
+            "trending": getattr(p, "trending", False),
+            "creator": {
+                "id": p.creator.id,
+                "name": f"{p.creator.first_name} {p.creator.last_name}".strip()
+                or p.creator.username,
+                "avatar": getattr(p.creator, "profile_picture", None),
+                "major": getattr(p.creator, "major", None),
+                "school": getattr(p.creator, "school", None),
+            },
+        }
+        for p in projects
+    ]
+
+
+@router.get("/search")
 def search_campaigns(
     request,
     q: str = "",
-    tags: Optional[str] = None,
+    tags: Optional[str] = None,       # comma-separated
     school: Optional[str] = None,
     min_goal: Optional[int] = None,
     max_goal: Optional[int] = None,
-    sort: str = "relevance",
+    sort: str = "relevance",           # relevance | trending | newest | top_funded | most_viewed | most_liked
     page: int = 1,
     page_size: int = 12,
 ):
+    
+
     qs = (
-        Campaign.objects.all()
-        .prefetch_related(
-            Prefetch(
-                "images",
-                queryset=CampaignImage.objects.only("photo").order_by("id"),
-            )
+    Campaign.objects.all()
+    .select_related("creator")
+    .prefetch_related(
+        Prefetch(
+            "images",
+            queryset=CampaignImage.objects.only("image", "sort_order").order_by("sort_order", "id"),
         )
     )
+)
 
-    # Basic text search
+    # --- Text search (basic relevance using OR across key fields) ---
     if q:
-        qs = qs.filter(
-            Q(title__icontains=q)
-            | Q(description__icontains=q)
-            | Q(school__icontains=q)
-            | Q(tags__icontains=q)
-        )
+        terms = [t.strip() for t in q.split() if t.strip()]
+        for term in terms:
+            qs = qs.filter(
+                Q(title__icontains=term)
+                | Q(one_line__icontains=term)
+                | Q(description__icontains=term)
+                | Q(school__icontains=term)
+                | Q(creator__first_name__icontains=term)
+                | Q(creator__last_name__icontains=term)
+                | Q(tags__icontains=term)   # CSV tags field
+            )
 
+    # --- Filters ---
     if tags:
-        wanted = [t.strip() for t in tags.split(",") if t.strip()]
-        for t in wanted:
+        for t in _csv_to_list(tags):
             qs = qs.filter(tags__icontains=t)
 
     if school:
@@ -356,48 +286,113 @@ def search_campaigns(
 
     if min_goal is not None:
         qs = qs.filter(goal_amount__gte=min_goal)
+
     if max_goal is not None:
         qs = qs.filter(goal_amount__lte=max_goal)
 
-    # Sorting
-    if sort == "new":
-        qs = qs.order_by("-created_at")
-    elif sort == "funded":
-        qs = qs.order_by("-current_amount")
-    elif sort == "trending":
-        qs = qs.order_by("-trending_score")
+    # --- Annotations used by sorting ---
+    funded_ratio = ExpressionWrapper(
+        Coalesce(F("current_amount"), 0.0) / Coalesce(NullIf(F("goal_amount"), 0), 1.0),
+        output_field=FloatField(),
+    )
+    qs = qs.annotate(funded_ratio=funded_ratio)
 
+    # "trending_score" fallback if you don't store one:
+    # views have small weight; likes a bit more; funding progress helps; newer gets a tiny boost
+    recency_boost = ExpressionWrapper(
+        # newer created_at => smaller diff => larger boost via 1/(days+1)
+        Value(1.0) / (Coalesce((now() - F("created_at")), 0) / Value(86400.0) + Value(1.0)),
+        output_field=FloatField(),
+    )
+    qs = qs.annotate(
+        _hot=Coalesce(F("likes"), 0) * 1.0
+             + Coalesce(F("views"), 0) * 0.1
+             + Coalesce(funded_ratio, 0.0) * 50.0
+             + recency_boost * 5.0
+    )
+
+    # --- Sorting ---
+    sort = (sort or "relevance").lower()
+    if sort in ("new", "newest"):
+        qs = qs.order_by("-created_at")
+    elif sort in ("funded", "top_funded"):
+        qs = qs.order_by("-funded_ratio", "-current_amount")
+    elif sort in ("views", "most_viewed"):
+        qs = qs.order_by("-views")
+    elif sort in ("likes", "most_liked"):
+        qs = qs.order_by("-likes")
+    elif sort in ("trending",):
+        # If you have a stored trending_score, swap to order_by("-trending_score")
+        qs = qs.order_by("-_hot")
+    else:
+        # "relevance" — crude: prioritize matches we already filtered by, then recency/hotness
+        qs = qs.order_by("-_hot", "-created_at")
+
+    # --- Pagination ---
     paginator = Paginator(qs, page_size)
     page_obj = paginator.get_page(page)
 
+    # --- Build response payload tailored to ExploreProjectCard ---
     items = []
+    today = now().date()
+
     for c in page_obj.object_list:
-        # first related image (prefetched)
+        # cover image + list of images (optional)
         cover_url = None
-        first_img = next(iter(c.images.all()), None)
-        if first_img and getattr(first_img, "photo", None):
-            url = first_img.photo.url
-            # if storage returns absolute URL (e.g., S3), use as-is
-            cover_url = url if url.startswith(("http://", "https://")) else request.build_absolute_uri(url)
+        image_urls: list[str] = []
+
+        imgs = list(c.images.all())  # already ordered by sort_order, id
+        if imgs:
+            first = imgs[0]
+            if getattr(first, "image", None):
+                cover_url = _abs_url(request, first.image.url)
+
+            for im in imgs[:6]:
+                if getattr(im, "image", None):
+                    image_urls.append(_abs_url(request, im.image.url))
+
 
         # days left
         days_left = 0
         if c.end_date:
-            delta = (c.end_date - now().date()).days
-            days_left = max(delta, 0)
+            days_left = max((c.end_date - today).days, 0)
 
-        items.append({
-            "id": c.id,
-            "title": c.title,
-            "description": c.description,
-            "school": c.school,
-            "current_amount": c.current_amount,
-            "goal_amount": c.goal_amount,
-            "tags": _csv_to_list(c.tags) or [],
-            "cover_image": cover_url,   
-            "backers": getattr(c, "backers", 0),
-            "days_left": days_left,
-        })
+        # creator object expected by the card
+        creator_name = (
+            f"{getattr(c.creator, 'first_name', '')} {getattr(c.creator, 'last_name', '')}".strip()
+            or getattr(c.creator, "username", "")
+            or getattr(c.creator, "email", "Creator")
+        )
+
+        items.append(
+            {
+                "id": c.id,
+                "title": c.title,
+                "one_line": getattr(c, "one_line", None),
+                "blurb": getattr(c, "description", None),
+                "cover_image": cover_url,
+                "images": [u for u in image_urls if u],
+                "tags": _csv_to_list(getattr(c, "tags", "")),
+                "likes": getattr(c, "likes", 0) or 0,
+                "views": getattr(c, "views", 0) or 0,
+                "comments": getattr(c, "comment_count", 0) or 0,
+                "featured": getattr(c, "featured", False) or False,
+                "trending": getattr(c, "trending", False) or False,
+                "creator": {
+                    "id": getattr(c.creator, "id", None),
+                    "name": creator_name,
+                    "avatar": getattr(c.creator, "profile_picture", None),
+                    "major": getattr(c.creator, "major", None),
+                    "school": getattr(c.creator, "school", None),
+                },
+                # Optional extras (used elsewhere on page)
+                "school": getattr(c, "school", None),
+                "current_amount": c.current_amount,
+                "goal_amount": c.goal_amount,
+                "backers": getattr(c, "backers", 0) or 0,
+                "days_left": days_left,
+            }
+        )
 
     return {
         "items": items,
@@ -406,17 +401,145 @@ def search_campaigns(
         "page_size": page_obj.paginator.per_page,
     }
 
-@router.get("/student_campaigns/{id}")
-def student_campaigns(request, id: int):
-    """Return all active campaigns for a student (public)."""
-    qs = Campaign.objects.filter(creator_id=id, is_active=True).order_by("-created_at")
-    return [c.to_card_dict() for c in qs]
+@router.get("/detailed/{campaign_id}", response=CampaignSchema, auth=JWTAuth())
+def get_campaign_detail(request, campaign_id: int):
+    campaign = get_object_or_404(
+        Campaign.objects
+        .select_related("creator")
+        .prefetch_related(
+            "images",
+            "milestones",
+            "team_member_links__user",
+        ),
+        id=campaign_id,
+    )
 
+    # ---------- Creator ----------
+    creator_user = campaign.creator
+    student_profile0 = getattr(creator_user, "student_profile", None)
 
+    raw_tags = campaign.tags or "" 
+    tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
 
+    avatar_url = (
+        _imagefield_url(request, getattr(creator_user, "profile_picture", None))
+        or _abs_url(request, getattr(creator_user, "profile_url", None))
+        or None
+    )
 
+    creator = CreatorSchema(
+        id=creator_user.id,
+        name=(creator_user.get_full_name() or creator_user.username or creator_user.email),
+        avatar=avatar_url or "",
+        major=(getattr(student_profile0, "major", "") or ""),
+        school=(getattr(student_profile0, "school", "") or ""),
+        linkedin=(
+            getattr(student_profile0, "linkedin", None)
+            or getattr(student_profile0, "portfolio_url", None)
+            or getattr(creator_user, "link", None)
+        ),
+    )
 
+    # ---------- Team members ----------
+    team_members: list[TeamMemberSchema] = []
+    if hasattr(campaign, "team_member_links"):
+        for link in campaign.team_member_links.select_related("user").all():
+            u = link.user
+            sp = getattr(u, "student_profile", None)
+            avatar_tm = (
+                _imagefield_url(request, getattr(u, "profile_picture", None))
+                or _abs_url(request, getattr(u, "profile_url", None))
+                or None
+            )
+            team_members.append(
+                TeamMemberSchema(
+                    id=u.id,
+                    name=(u.get_full_name() or u.username or u.email),
+                    role=(link.role or ""),
+                    bio=getattr(u, "bio", "") or "",
+                    linkedin=(
+                        getattr(sp, "linkedin", None)
+                        or getattr(sp, "portfolio_url", None)
+                        or getattr(u, "link", None)
+                    ),
+                    avatar=avatar_tm or "",
+                )
+            )
+    elif hasattr(campaign, "team_members"):
+        for tm in campaign.team_members.all():
+            sp = getattr(tm, "student_profile", None)
+            avatar_tm = (
+                _imagefield_url(request, getattr(tm, "profile_picture", None))
+                or _abs_url(request, getattr(tm, "profile_url", None))
+                or None
+            )
+            team_members.append(
+                TeamMemberSchema(
+                    id=tm.id,
+                    name=(tm.get_full_name() or tm.username or tm.email),
+                    role=getattr(tm, "role", "") or "",
+                    bio=getattr(tm, "bio", "") or "",
+                    linkedin=(
+                        getattr(sp, "linkedin", None)
+                        or getattr(sp, "portfolio_url", None)
+                        or getattr(tm, "link", None)
+                    ),
+                    avatar=avatar_tm or "",
+                )
+            )
 
+    # ---------- Images (return URLs only to match CampaignSchema.images: list[str]) ----------
+    images = [
+    CampaignImageSchema(
+        id=img.id,
+        url=_image_url(request, img.image),
+        caption=img.caption or "",
+    )
+    for img in campaign.images.all().order_by("sort_order", "id")
+]
+
+    # ----- Contact info -----
+    contact = ContactSchema(
+        email=getattr(campaign, "contact_email", None) or creator_user.email,
+        github=getattr(campaign, "contact_github", None),
+        youtube=getattr(campaign, "contact_youtube", None),
+    )
+
+    milestones = [
+        MilestoneSchema(
+            title=m.title,
+            status=m.status,
+            details=m.details or "",
+        )
+        for m in campaign.milestones.all()
+    ]
+
+    return CampaignSchema(
+        id=campaign.id,
+        title=campaign.title,
+        school=getattr(campaign, "school", ""),
+        one_line=getattr(campaign, "one_line", "") or "",
+        project_summary=campaign.project_summary or "",
+        problem_statement=campaign.problem_statement or "",
+        proposed_solution=campaign.proposed_solution or "",
+        technical_approach=campaign.technical_approach or "",
+        implementation_progress=campaign.implementation_progress or "",
+        impact_and_future_work=campaign.impact_and_future_work or "",
+        mentorship_or_support_needs=campaign.mentorship_or_support_needs or "",
+        goal_amount=int(campaign.goal_amount or 0),
+        current_amount=int(getattr(campaign, "current_amount", 0) or 0),
+        tags=tags_list,
+        images=images,  # <<< now list[str], matches schema
+        creator=creator,
+        team_members=team_members,
+        is_sponsored=campaign.is_sponsored,
+        sponsored_by=campaign.sponsored_by,
+        start_date=campaign.start_date,
+        end_date=campaign.end_date,
+        milestones=milestones,
+        verified=getattr(campaign, "verified", False),
+        contact=contact,
+    )
 
 
 
