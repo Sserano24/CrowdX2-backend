@@ -47,6 +47,7 @@ class Campaign(models.Model):
     mentorship_or_support_needs = models.TextField(blank=True, null=True)
 
     outreach_message = models.TextField(blank=True, null=True)
+    stripe_session_id = models.CharField(max_length=255, null=True, blank=True)
 
 
     blurb = models.TextField(blank=True, null=True)  # NEW (short teaser)
