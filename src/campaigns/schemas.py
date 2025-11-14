@@ -196,6 +196,7 @@ class CampaignImageSchema(Schema):
 class CampaignSchema(Schema):
     id: int
     title: str
+    like_count: int
     school: Optional[str] = None
     one_line: str
     project_summary: str
@@ -240,7 +241,7 @@ class MilestoneIn(Schema):
 
 
 class ContactIn(Schema):
-    email: EmailStr
+    email: Optional[EmailStr] = None
     github: Optional[str] = None
     youtube: Optional[str] = None
 

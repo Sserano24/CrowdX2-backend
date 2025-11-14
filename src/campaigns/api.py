@@ -15,6 +15,7 @@ from django.db.models.functions import Coalesce, NullIf
 
 from ninja.errors import HttpError
 from .schemas import *
+from .models import *
 
 router = Router()
 
@@ -62,7 +63,7 @@ def _imagefield_url(request, image_field) -> str | None:
     return _abs_url(request, url)
 
 
-@router.post("/create", auth=JWTAuth())
+@router.post("/create", auth=JWTAuth()) #Used to create a new campaign
 @transaction.atomic
 def create_campaign(request, payload: CampaignCreateSchema):
     if not request.user or not request.user.is_authenticated:
@@ -107,7 +108,8 @@ def create_campaign(request, payload: CampaignCreateSchema):
         fiat_payout_details=fiat_payout_details,
         crypto_payout_address=crypto_payout_address,
 
-        tags=payload.tags,
+        tags = ", ".join(payload.tags),
+
         is_sponsored=payload.is_sponsored,
         sponsored_by=payload.sponsored_by or "",
         start_date=payload.start_date,
@@ -140,7 +142,7 @@ def create_campaign(request, payload: CampaignCreateSchema):
     return {"id": campaign.id}
 
 
-@router.post("/{campaign_id}/images/upload", auth=JWTAuth())
+@router.post("/{campaign_id}/images/upload", auth=JWTAuth()) #Used to upload images for a campaign
 def upload_campaign_image(
     request,
     campaign_id: int,
@@ -165,7 +167,7 @@ def upload_campaign_image(
 
 
 #stats for homepage
-@router.get("/stats", response=StatsOut, auth=None)
+@router.get("/stats", response=StatsOut, auth=None) #Used for Homepage stats
 def get_stats(request):
 
     active_campaigns_count = Campaign.objects.filter(is_active=True).count()
@@ -181,32 +183,120 @@ def get_stats(request):
 # Public route for spotlight campaigns
 @router.get("/spotlight")
 def spotlight(request):
-    items = Campaign.objects.filter(is_active=True).order_by("-trending_score")[:3]
+    # Always pick the top 3 highest trending_score campaigns
+    items = (
+        Campaign.objects.filter(is_active=True)
+        .order_by("-trending_score")[:3]
+    )
+
     return {
         "items": [
             {
                 "id": c.id,
                 "title": c.title,
-                "description": c.description[:160],
+                "description": (c.one_line or c.project_summary or "")[:160],
+                "cover_image": _imagefield_url(request, c.images.first().image if c.images.exists() else None),
+                "creator_name": c.creator.get_full_name() or c.creator.username,
                 "school": c.school,
-                "current_amount": float(c.current_amount),
-                "goal_amount": float(c.goal_amount),
+                "current_amount": float(c.current_amount or 0),
+                "goal_amount": float(c.goal_amount or 0),
                 "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
+
+                "trending_score": float(c.trending_score or 0),
             }
             for c in items
         ]
     }
 # Note: recompute_trending_scores() moved to services.py
 
-
 @router.get("/student_campaigns/{id}")
 def student_campaigns(request, id: int):
-    """Return all active campaigns for a student (public)."""
-    qs = Campaign.objects.filter(creator_id=id, is_active=True).order_by("-created_at")
-    return [c.to_card_dict() for c in qs]
+    """
+    Return all active campaigns for a specific student (public).
+
+    Ordered by:
+      - featured first
+      - trending_score next
+      - newest last
+    """
+
+    student = get_object_or_404(User, id=id, is_active=True)
+
+    qs = (
+        Campaign.objects.filter(creator_id=student.id, is_active=True)
+        .select_related("creator")
+        .prefetch_related("images")
+        .order_by("-featured", "-trending_score", "-created_at")
+    )
+
+    items = []
+    for c in qs:
+        # --- Images ---
+        image_urls = []
+        for img in c.images.all():
+            image_urls.append(_imagefield_url(request, img.image))
+
+        cover_url = (
+            _imagefield_url(request, c.images.first().image)
+            if c.images.exists()
+            else None
+        )
+
+        # --- Creator name ---
+        creator_name = (
+            c.creator.get_full_name().strip()
+            if c.creator.get_full_name()
+            else c.creator.username
+        )
+
+        # --- Days left ---
+        days_left = None
+        if getattr(c, "end_date", None):
+            delta = c.end_date - timezone.now().date()
+            days_left = max(delta.days, 0)
+
+        # --- Build card dict (your exact structure) ---
+        item = {
+            "id": c.id,
+            "title": c.title,
+            "one_line": getattr(c, "one_line", None),
+            "blurb": getattr(c, "project_summary", None),
+
+            "cover_image": cover_url,
+            "images": [u for u in image_urls if u],
+
+            "tags": _csv_to_list(getattr(c, "tags", "")),
+
+            "likes": getattr(c, "likes", 0) or 0,
+            "views": getattr(c, "views", 0) or 0,
+            "comments": getattr(c, "comment_count", 0) or 0,
+
+            "featured": getattr(c, "featured", False) or False,
+            "trending": getattr(c, "trending", False) or False,
+
+            "creator": {
+                "id": getattr(c.creator, "id", None),
+                "name": creator_name,
+                "avatar": _image_url(request, getattr(c.creator, "profile_image", None)),
+                "major": getattr(c.creator, "major", None),
+                "school": getattr(c.creator, "school", None),
+            },
+
+            # --- Funding & extra metadata ---
+            "school": getattr(c, "school", None),
+            "current_amount": float(getattr(c, "current_amount", 0) or 0),
+            "goal_amount": float(getattr(c, "goal_amount", 0) or 0),
+            "backers": getattr(c, "backers", 0) or 0,
+            "days_left": days_left,
+        }
+
+        items.append(item)
+
+    return items
 
 
-@router.get("/dash/myprojects", response=List[ProjectCardSchema])
+
+@router.get("/dash/myprojects", response=List[ProjectCardSchema]) #Used For personal dashboard
 def get_projects(request):
     """Return a list of projects formatted for ExploreProjectCard."""
     projects = Project.objects.select_related("creator").all()
@@ -237,7 +327,7 @@ def get_projects(request):
     ]
 
 
-@router.get("/search")
+@router.get("/search") #Used for Explore Page
 def search_campaigns(
     request,
     q: str = "",
@@ -269,7 +359,7 @@ def search_campaigns(
             qs = qs.filter(
                 Q(title__icontains=term)
                 | Q(one_line__icontains=term)
-                | Q(description__icontains=term)
+                | Q(project_summary__icontains=term)
                 | Q(school__icontains=term)
                 | Q(creator__first_name__icontains=term)
                 | Q(creator__last_name__icontains=term)
@@ -369,7 +459,7 @@ def search_campaigns(
                 "id": c.id,
                 "title": c.title,
                 "one_line": getattr(c, "one_line", None),
-                "blurb": getattr(c, "description", None),
+                "blurb": getattr(c, "project_summary", None),
                 "cover_image": cover_url,
                 "images": [u for u in image_urls if u],
                 "tags": _csv_to_list(getattr(c, "tags", "")),
@@ -381,7 +471,7 @@ def search_campaigns(
                 "creator": {
                     "id": getattr(c.creator, "id", None),
                     "name": creator_name,
-                    "avatar": getattr(c.creator, "profile_picture", None),
+                    "avatar": _image_url(request, getattr(c.creator, "profile_image", None)),
                     "major": getattr(c.creator, "major", None),
                     "school": getattr(c.creator, "school", None),
                 },
@@ -401,7 +491,7 @@ def search_campaigns(
         "page_size": page_obj.paginator.per_page,
     }
 
-@router.get("/detailed/{campaign_id}", response=CampaignSchema, auth=JWTAuth())
+@router.get("/detailed/{campaign_id}", response=CampaignSchema, auth=JWTAuth()) #Used for Campagin View individual projects page
 def get_campaign_detail(request, campaign_id: int):
     campaign = get_object_or_404(
         Campaign.objects
@@ -413,6 +503,8 @@ def get_campaign_detail(request, campaign_id: int):
         ),
         id=campaign_id,
     )
+
+    Campaign.objects.filter(id=campaign_id).update(views=F("views") + 1)
 
     # ---------- Creator ----------
     creator_user = campaign.creator
@@ -517,6 +609,7 @@ def get_campaign_detail(request, campaign_id: int):
     return CampaignSchema(
         id=campaign.id,
         title=campaign.title,
+        like_count=int(getattr(campaign, "likes", 0) or 0),
         school=getattr(campaign, "school", ""),
         one_line=getattr(campaign, "one_line", "") or "",
         project_summary=campaign.project_summary or "",

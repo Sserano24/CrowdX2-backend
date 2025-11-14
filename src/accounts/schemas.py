@@ -34,6 +34,8 @@ class UserBase(Schema):
 
 class RegisterUser(UserBase):
     password: str
+    profile_image: Optional[str] = None
+
     # nested profile data (exactly one required based on user_type)
     student: Optional[StudentProfileIn] = None
     professional: Optional[ProfessionalProfileIn] = None

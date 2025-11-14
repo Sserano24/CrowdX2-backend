@@ -35,7 +35,7 @@ class UserAdmin(DjangoUserAdmin):
     # Common fields available to all on the change page
     base_fieldsets = (
         ("Account", {"fields": ("email", "username", "password")}),
-        ("Personal info", {"fields": ("first_name", "last_name", "phone_number", "bio", "link")}),
+        ("Personal info", {"fields": ("first_name", "last_name", "phone_number", "bio", "link", "profile_image")}),
         ("Status & Access", {"fields": ("is_email_verified", "is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
         ("Dates", {"fields": ("last_login", "date_joined")}),
     )
@@ -61,7 +61,7 @@ class UserAdmin(DjangoUserAdmin):
             # Add form: show common + a small type group, extras come after save
             return (
                 ("Account", {"fields": ("email", "username", "password")}),
-                ("Personal info", {"fields": ("first_name", "last_name", "phone_number", "bio", "link")}),
+                ("Personal info", {"fields": ("first_name", "last_name", "phone_number", "bio", "link", )}),
                 ("User Type", {"fields": ("user_type",)}),
                 ("Status & Access", {"fields": ("is_email_verified", "is_active", "is_staff", "is_superuser", "groups", "user_permissions")}),
             )

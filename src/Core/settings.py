@@ -211,7 +211,7 @@ from celery.schedules import crontab  # noqa: E402
 CELERY_BEAT_SCHEDULE = {
     "recompute-trending-every-2min": {
         "task": "campaigns.tasks.recompute_trending_scores_task",
-        "schedule": 120.0,
+        "schedule": 3600.0,
     },
 }
 

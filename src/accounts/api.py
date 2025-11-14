@@ -6,7 +6,7 @@ from django.shortcuts import get_object_or_404
 from ninja import Router, Schema, File
 from ninja.files import UploadedFile
 from django.utils.text import slugify
-
+from django.conf import settings
 
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
@@ -17,6 +17,21 @@ from .models import UserType as UserTypeEnum  # enum from your models
 
 router = Router()
 User = get_user_model()
+
+
+def _image_url(request, image_field):
+    """Return absolute URL for an ImageField (or None)."""
+    if not image_field:
+        return None
+    try:
+        url = image_field.url
+    except ValueError:
+        # file might not exist yet
+        return None
+    # If it's already absolute, just return it
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return request.build_absolute_uri(url)
 
 
 def user_to_out(u) -> UserOut:
@@ -85,17 +100,14 @@ def update_profile(request, data: UserUpdate):
 @router.post("/register", response=UserOut)
 @transaction.atomic
 def register(request, payload: RegisterUser):
-    # Enforce allowed user_type values that your endpoint supports
     if payload.user_type not in ("student", "professional"):
         raise HttpError(400, "user_type must be 'student' or 'professional'")
 
-    # Require matching profile block
     if payload.user_type == "student" and not payload.student:
         raise HttpError(400, "student payload required for user_type=student")
     if payload.user_type == "professional" and not payload.professional:
         raise HttpError(400, "professional payload required for user_type=professional")
 
-    # Create base user
     try:
         u = User.objects.create_user(
             email=payload.email,
@@ -106,17 +118,19 @@ def register(request, payload: RegisterUser):
             phone_number=payload.phone_number,
         )
     except IntegrityError:
-        # likely duplicate email/username
         raise HttpError(400, "User with this email/username already exists.")
 
-    # Set common fields (match your model names)
     u.user_type = payload.user_type
     u.bio = payload.bio
-    u.link = payload.link            # <— single URL now
+    u.link = payload.link
     u.wallet_address = payload.wallet_address
+
+    # optional: URL-based profile image
+    if getattr(payload, "profile_image", None):
+        u.profile_image = payload.profile_image
+
     u.save()
 
-    # Create the matching profile
     if payload.user_type == "student":
         from .models import StudentProfile
         sp = payload.student
@@ -142,71 +156,75 @@ def register(request, payload: RegisterUser):
 
     return user_to_out(u)
 
-@router.post("/me/profile-image", auth=JWTAuth(), response=ProfileImageOut)
-@transaction.atomic
-def upload_profile_image(request, file: UploadedFile = File(...)):
-    """
-    Upload or replace the current user's profile image.
-    Works for both StudentProfile and ProfessionalProfile.
-    """
-    user = request.auth  # JWTAuth puts the user here
+@router.post("/profile/avatar", auth=JWTAuth())
+def upload_avatar(request, file: UploadedFile = File(...)):
+    user = request.user  # current logged-in user
 
-    if not user or not user.is_authenticated:
-        # Should normally be handled by JWTAuth, but just in case:
-        raise HttpError(401, "Authentication required")
+    # Save to your ImageField (adjust field name as needed)
+    user.profile_image.save(file.name, file, save=True)
 
-    # Try to find a linked StudentProfile or ProfessionalProfile
-    profile = None
+    # If you have a helper to build full URLs:
+    avatar_url = _image_url(request, user.profile_image)
 
-    # Student first
-    try:
-        profile = user.student_profile
-    except ObjectDoesNotExist:
-        profile = None
-
-    # If no student profile, try professional
-    if profile is None:
-        try:
-            profile = user.professional_profile
-        except ObjectDoesNotExist:
-            profile = None
-
-    if profile is None:
-        raise HttpError(400, "No profile found for this user")
-
-    # Assign file to the ImageField – this will upload to Azure via your default storage
-    profile.profile_image = file
-    profile.save()
-
-    # Build a URL safely
-    url = ""
-    if profile.profile_image and hasattr(profile.profile_image, "url"):
-        url = profile.profile_image.url
-
-    return ProfileImageOut(url=url)
+    return {"avatar_url": avatar_url}
 
 
 
-@router.get("/spotlight_users", response=List[UserOut])
-def get_spotlight_users(request):
-    users = (
-        User.objects
-        .filter(is_active=True)
-        .order_by("-user_score")[:4]
-    )
+# @router.get("/spotlight_users", response=List[UserOut])
+# def get_spotlight_users(request):
+#     users = (
+#         User.objects
+#         .filter(is_active=True)
+#         .order_by("-user_score")[:4]
+#     )
 
-    return [
-        {
-            "id": u.id,
-            # Full first name + first letter of last name (with dot), guarded if last_name is empty
-            "name": f"{u.first_name} {u.last_name[0] + '.' if u.last_name else ''}",
-            "profile_picture": "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=1600&auto=format&fit=crop",
-            "blurb": u.blurb,
-            # Your property already returns values("id","title") → list of dicts
-            "associated_projects": list(u.associated_campaigns),
-        }
-        for u in users
-    ]
+#     return [
+#         {
+#             "id": u.id,
+#             # Full first name + first letter of last name (with dot), guarded if last_name is empty
+#             "name": f"{u.first_name} {u.last_name[0] + '.' if u.last_name else ''}",
+#             "profile_picture": "https://images.unsplash.com/photo-1534796636912-3b95b3ab5986?q=80&w=1600&auto=format&fit=crop",
+#             "blurb": u.blurb,
+#             # Your property already returns values("id","title") → list of dicts
+#             "associated_projects": list(u.associated_campaigns),
+#         }
+#         for u in users
+#     ]
+
+
+@router.get("/users/recent")
+def recent_users(request):
+    # Get last 4 created users
+    users = User.objects.filter(user_type="student").order_by("-id")[:4]
+
+
+    return {
+        "items": [
+            {
+                "id": u.id,
+                "name": f"{u.first_name} {u.last_name}".strip() or u.username,
+                "major": getattr(u.student, "major", None) if hasattr(u, "student") else None,
+                "school": getattr(u.student, "school", None) if hasattr(u, "student") else None,
+                "profile_image": (
+                    request.build_absolute_uri(u.profile_image.url)
+                    if getattr(u, "profile_image", None)
+                    and getattr(u.profile_image, "url", None)
+                    else None
+                ),
+                "tags": [
+                    t.strip()
+                    for t in (getattr(u.student, "tags", "") or "").split(",")
+                    if t.strip()
+                ] if hasattr(u, "student") else [],
+                "bio": u.bio or "",
+                # Use .campaigns.count() only if you set related_name="campaigns"
+                "projectsCount": u.campaigns.count(),
+            }
+            for u in users
+        ]
+    }
+
+
 
 @router.get("/profile/{id}", auth=JWTAuth())
 def get_user_profile(request, id: int):
@@ -219,6 +237,7 @@ def get_user_profile(request, id: int):
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
+        "profile_picture": _image_url(request, getattr(user, "profile_image", None)),
         "email": user.email,
         "bio": user.bio,
         "user_type": user.user_type,
@@ -275,8 +294,9 @@ def search_users(request, query: str = ""):
             | models.Q(last_name__icontains=q)
             | models.Q(email__icontains=q)
         )
-        .order_by("id")[:10]  # limit results
+        .order_by("-featured", "-trending",)[:10]
     )
+
 
     results = [
         UserSearchResult(
