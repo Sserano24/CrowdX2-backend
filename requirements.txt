@@ -18,3 +18,4 @@ rav
 mssql-django
 pyodbc
 dj-database-url
+django-storages[azure]
