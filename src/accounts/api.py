@@ -294,7 +294,7 @@ def search_users(request, query: str = ""):
             | models.Q(last_name__icontains=q)
             | models.Q(email__icontains=q)
         )
-        .order_by("-featured", "-trending",)[:10]
+        .order_by("-user_score",)[:10]
     )
 
 
