@@ -24,10 +24,12 @@ SECRET_KEY = os.getenv("SECRET_KEY", "")
 DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
 # Hosts (env overrides recommended in prod)
-ALLOWED_HOSTS = csv_env(
-    "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,crowdx.azurewebsites.net,.vercel.app",
-)
+raw_hosts = os.getenv("ALLOWED_HOSTS", "")
+if raw_hosts:
+    ALLOWED_HOSTS = [h.strip() for h in raw_hosts.split(",") if h.strip()]
+else:
+    # safe defaults for local dev
+    ALLOWED_HOSTS = ["localhost", "127.0.0.1"]
 
 # # === Paths / Static & Media ===
 # MEDIA_ROOT = BASE_DIR / "media"
