@@ -2,7 +2,7 @@ name: Build & Push to ACR
 
 on:
   push:
-    branches: [ fall-changes ]   # change if your default branch is different
+    branches: [ azure_db ]   # change if your default branch is different
 
 env:
   REGISTRY: ${{ secrets.REGISTRY_LOGIN_SERVER }}   # crowdxacr.azurecr.io
