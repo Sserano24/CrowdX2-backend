@@ -105,3 +105,33 @@ class GuestRegisterIn(Schema):
     email: EmailStr
     first_name: str | None = None
     last_name: str | None = None
+
+
+class StudentProfileUpdate(Schema):
+    school: str | None = None
+    major: str | None = None
+    graduation_year: int | None = None
+    gpa: float | None = None
+    portfolio_url: str | None = None
+
+
+class ProfessionalProfileUpdate(Schema):
+    company: str | None = None
+    title: str | None = None
+    linkedin_url: str | None = None
+    hiring: bool | None = None
+    interests: str | None = None
+
+
+class UserProfileUpdate(Schema):
+    first_name: str | None = None
+    last_name: str | None = None
+    bio: str | None = None
+    link: str | None = None
+    linkedin: str | None = None
+    github: str | None = None
+
+    user_type: str | None = None  # READ ONLY on backend — ignored for safety
+
+    student: StudentProfileUpdate | None = None
+    professional: ProfessionalProfileUpdate | None = None

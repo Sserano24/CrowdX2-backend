@@ -7,13 +7,17 @@ from ninja import Router, Schema, File
 from ninja.files import UploadedFile
 from django.utils.text import slugify
 from django.conf import settings
-
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
 from django.core.exceptions import ObjectDoesNotExist
+from datetime import timedelta
+
 
 from .schemas import *
-from .models import UserType as UserTypeEnum  # enum from your models
+from .models import  StudentProfile, ProfessionalProfile, UserType as UserTypeEnum  # enum from your models
+
+
+from ninja_jwt.tokens import RefreshToken
 
 router = Router()
 User = get_user_model()
@@ -88,18 +92,10 @@ def user_to_out(u) -> UserOut:
 #     return user_to_out(request.user)
 
 
-@router.put("/update", response=AccountSuccessfulResponse, auth=JWTAuth())
-def update_profile(request, data: UserUpdate):
-    u = request.user
-    for attr, val in data.dict(exclude_unset=True).items():
-        setattr(u, attr, val)
-    u.save()
-    return {"message": "User updated successfully"}
-
-
 @router.post("/register", response=UserOut)
 @transaction.atomic
 def register(request, payload: RegisterUser):
+    # 1) Validate user_type + nested payloads (unchanged)
     if payload.user_type not in ("student", "professional"):
         raise HttpError(400, "user_type must be 'student' or 'professional'")
 
@@ -108,50 +104,103 @@ def register(request, payload: RegisterUser):
     if payload.user_type == "professional" and not payload.professional:
         raise HttpError(400, "professional payload required for user_type=professional")
 
+    # ----------------------------------------------------
+    # 2) Try to find existing user by email
+    # ----------------------------------------------------
     try:
-        u = User.objects.create_user(
-            email=payload.email,
-            username=payload.username,
-            password=payload.password,
-            first_name=payload.first_name,
-            last_name=payload.last_name,
-            phone_number=payload.phone_number,
-        )
-    except IntegrityError:
-        raise HttpError(400, "User with this email/username already exists.")
+        u = User.objects.get(email=payload.email)
+        existing_by_email = True
+    except User.DoesNotExist:
+        u = None
+        existing_by_email = False
 
+    # ----------------------------------------------------
+    # 3) Existing email found → ONLY allow upgrading guests
+    # ----------------------------------------------------
+    if existing_by_email:
+
+        # ❌ If user is not a guest, block registration
+        if u.user_type != UserTypeEnum.GUEST:
+            raise HttpError(
+                400,
+                "Email already registered. Please log in instead."
+            )
+
+        # ✅ Safe to upgrade guest → check for username conflicts
+        if payload.username and payload.username != u.username:
+            if User.objects.filter(username=payload.username).exclude(pk=u.pk).exists():
+                raise HttpError(400, "User with this username already exists.")
+            u.username = payload.username
+
+        # Update core fields (convert guest → real account)
+        u.first_name = payload.first_name
+        u.last_name = payload.last_name
+        u.phone_number = payload.phone_number
+        u.set_password(payload.password)   # guest → real password
+
+    else:
+        # ----------------------------------------------------
+        # 4) Brand-new user creation
+        # ----------------------------------------------------
+        # Ensure username uniqueness BEFORE hitting DB
+        if User.objects.filter(username=payload.username).exists():
+            raise HttpError(400, "User with this username already exists.")
+
+        try:
+            u = User.objects.create_user(
+                email=payload.email,
+                username=payload.username,
+                password=payload.password,
+                first_name=payload.first_name,
+                last_name=payload.last_name,
+                phone_number=payload.phone_number,
+            )
+        except IntegrityError:
+            raise HttpError(400, "User with this email/username already exists.")
+
+    # ----------------------------------------------------
+    # 5) Set universal user fields
+    # ----------------------------------------------------
     u.user_type = payload.user_type
     u.bio = payload.bio
     u.link = payload.link
     u.wallet_address = payload.wallet_address
 
-    # optional: URL-based profile image
     if getattr(payload, "profile_image", None):
         u.profile_image = payload.profile_image
 
     u.save()
 
+    # ----------------------------------------------------
+    # 6) Create / update profile based on account type
+    # ----------------------------------------------------
     if payload.user_type == "student":
         from .models import StudentProfile
         sp = payload.student
-        StudentProfile.objects.create(
+
+        StudentProfile.objects.update_or_create(
             user=u,
-            school=sp.school,
-            major=sp.major or "",
-            graduation_year=sp.graduation_year,
-            gpa=sp.gpa,
-            linkedin=sp.portfolio_url or "",
+            defaults={
+                "school": sp.school,
+                "major": sp.major or "",
+                "graduation_year": sp.graduation_year,
+                "gpa": sp.gpa,
+                "linkedin": sp.portfolio_url or "",
+            },
         )
     else:
         from .models import ProfessionalProfile
         pp = payload.professional
-        ProfessionalProfile.objects.create(
+
+        ProfessionalProfile.objects.update_or_create(
             user=u,
-            company=pp.company,
-            title=pp.title or "",
-            linkedin_url=pp.linkedin_url or "",
-            hiring=bool(pp.hiring) if pp.hiring is not None else False,
-            interests=pp.interests or "",
+            defaults={
+                "company": pp.company,
+                "title": pp.title or "",
+                "linkedin_url": pp.linkedin_url or "",
+                "hiring": bool(pp.hiring) if pp.hiring is not None else False,
+                "interests": pp.interests or "",
+            },
         )
 
     return user_to_out(u)
@@ -194,36 +243,48 @@ def upload_avatar(request, file: UploadedFile = File(...)):
 
 @router.get("/users/recent")
 def recent_users(request):
-    # Get last 4 created users
-    users = User.objects.filter(user_type="student").order_by("-id")[:4]
+    # Only student users, newest first, and pull their StudentProfile in one query
+    users = (
+        User.objects
+        .filter(user_type="student")
+        .select_related("student_profile")
+        .order_by("-id")[:4]
+    )
 
+    items = []
+    for u in users:
+        sp = getattr(u, "student_profile", None)
 
-    return {
-        "items": [
+        # Tags: only if you later add a `tags` field to StudentProfile
+        if sp and hasattr(sp, "tags"):
+            raw_tags = sp.tags or ""
+            tags = [t.strip() for t in raw_tags.split(",") if t.strip()]
+        else:
+            tags = []
+
+        # Profile image absolute URL
+        if getattr(u, "profile_image", None) and getattr(u.profile_image, "url", None):
+            profile_image_url = request.build_absolute_uri(u.profile_image.url)
+        else:
+            profile_image_url = None
+
+        items.append(
             {
                 "id": u.id,
-                "name": f"{u.first_name} {u.last_name}".strip() or u.username,
-                "major": getattr(u.student, "major", None) if hasattr(u, "student") else None,
-                "school": getattr(u.student, "school", None) if hasattr(u, "student") else None,
-                "profile_image": (
-                    request.build_absolute_uri(u.profile_image.url)
-                    if getattr(u, "profile_image", None)
-                    and getattr(u.profile_image, "url", None)
-                    else None
-                ),
-                "tags": [
-                    t.strip()
-                    for t in (getattr(u.student, "tags", "") or "").split(",")
-                    if t.strip()
-                ] if hasattr(u, "student") else [],
+                "name": (f"{u.first_name} {u.last_name}".strip() or u.username or u.email),
+                "major": sp.major if sp else None,
+                "school": sp.school if sp else None,
+                "profile_image": profile_image_url,
+                "tags": tags,
                 "bio": u.bio or "",
-                # Use .campaigns.count() only if you set related_name="campaigns"
-                "projectsCount": u.campaigns.count(),
+                # works if Campaign has `creator = ForeignKey(User, related_name="campaigns", ...)`
+                "projectsCount": getattr(u, "campaigns", []).count()
+                if hasattr(u, "campaigns")
+                else 0,
             }
-            for u in users
-        ]
-    }
+        )
 
+    return {"items": items}
 
 
 @router.get("/profile/{id}", auth=JWTAuth())
@@ -318,30 +379,63 @@ def make_guest_username(email: str) -> str:
         username = f"{base}{i}"
     return username
 
+def make_guest_tokens(user):
+    """Short-lived tokens specifically for guest accounts."""
+    refresh = RefreshToken.for_user(user)
+
+    # Mark the tokens as guest
+    refresh["guest"] = True
+    access = refresh.access_token
+    access["guest"] = True
+
+    # Optional: override TTL (e.g., 5 min access, 30 min refresh)
+    access.set_exp(lifetime=timedelta(minutes=50))
+    refresh.set_exp(lifetime=timedelta(minutes=120))
+
+    return {
+        "access": str(access),
+        "refresh": str(refresh),
+    }
+
 @router.post("/guest/register")
 @transaction.atomic
 def guest_register(request, payload: GuestRegisterIn):
-    user, created = User.objects.get_or_create(
-        email=payload.email,
-        defaults={
-            "username": make_guest_username(payload.email),
-            "first_name": payload.first_name or "",
-            "last_name": payload.last_name or "",
-            "user_type": UserTypeEnum.GUEST,  # ✅ now definitely the TextChoices
-        },
-    )
+    """Creates or reuses a guest user. If guest already used once, require signup."""
+    try:
+        user = User.objects.get(email=payload.email)
 
-    if created:
+        # Case 1 — Email belongs to a REAL account
+        if user.user_type != UserTypeEnum.GUEST:
+            # Frontend can check: error.detail === "EMAIL_REGISTERED"
+            raise HttpError(400, "EMAIL_REGISTERED")
+
+        # Case 2 — Email belongs to an EXISTING guest → block second guest session
+        # Frontend can check: error.detail === "GUEST_ALREADY_USED"
+        raise HttpError(400, "GUEST_ALREADY_USED")
+
+    except User.DoesNotExist:
+        # Case 3 — New guest user (first-time guest session)
+        user = User.objects.create(
+            email=payload.email,
+            username=make_guest_username(payload.email),
+            first_name=payload.first_name or "",
+            last_name=payload.last_name or "",
+            user_type=UserTypeEnum.GUEST,
+        )
         user.set_unusable_password()
         user.save()
 
+    # Create guest tokens
+    tokens = make_guest_tokens(user)
+    name = f"{user.first_name} {user.last_name}".strip() or "Guest"
+
     return {
         "id": user.id,
-        "email": user.email,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "user_type": user.user_type,
+        "name": name,
+        **tokens,
     }
+
+
 
 @router.get("/navbar", auth=JWTAuth())
 def get_current_user(request):
@@ -352,3 +446,114 @@ def get_current_user(request):
         "email": user.email,
         "user_type": user.user_type,
     }
+
+
+@router.post("/profile/images/upload", auth=JWTAuth())
+def upload_profile_image(
+    request,
+    file: UploadedFile = File(...),
+):
+    """
+    Upload or replace the current user's profile image.
+
+    Frontend:
+      POST /api/dashboard/profile/images/upload
+      Content-Type: multipart/form-data
+      Body: file=<image>
+    """
+    user = request.user
+
+    if not user or not user.is_authenticated:
+        # same style as your campaign endpoint (tuple or HttpError both ok)
+        return 401, {"detail": "Authentication required."}
+
+    if not file:
+        return 400, {"detail": "No image file provided."}
+
+    # Optional: basic size / content-type checks
+    max_size = 5 * 1024 * 1024  # 5 MB
+    if file.size > max_size:
+        return 400, {"detail": "Image file is too large (max 5 MB)."}
+
+    allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if file.content_type not in allowed_types:
+        return 400, {"detail": "Unsupported image type."}
+
+    # Optional: delete old file to avoid orphans
+    if user.profile_image:
+        user.profile_image.delete(save=False)
+
+    # Save to the ImageField on your User model
+    user.profile_image.save(file.name, file, save=True)
+
+    # Build absolute URL for frontend
+    if user.profile_image and hasattr(user.profile_image, "url"):
+        image_url = request.build_absolute_uri(user.profile_image.url)
+    else:
+        image_url = None
+
+    return {
+        "id": user.id,
+        "url": image_url,          # mirrors CampaignImage response style
+        "profile_image": image_url # keep this if your frontend already expects it
+    }
+
+
+def apply_updates(instance, updates: dict):
+    """Apply non-None values from a dict to a Django model instance."""
+    changed = False
+    for field, value in updates.items():
+        if value is not None:     # Skip fields not provided
+            setattr(instance, field, value)
+            changed = True
+    return changed
+
+
+# ------- Endpoint -------
+@router.put("/data_update", auth=JWTAuth())
+@transaction.atomic
+def update_profile(request, payload: UserProfileUpdate):
+    """
+    Update current user's profile info.
+    """
+    user = request.user
+    if not user or not user.is_authenticated:
+        raise HttpError(401, "Authentication required.")
+
+    # -------- UPDATE USER FIELDS --------
+    user_updates = {}
+
+    if payload.first_name is not None:
+        user_updates["first_name"] = payload.first_name.strip()
+
+    if payload.last_name is not None:
+        user_updates["last_name"] = payload.last_name.strip()
+
+    if payload.bio is not None:
+        user_updates["bio"] = payload.bio.strip()
+
+    if apply_updates(user, user_updates):
+        user.save()
+
+    # -------- UPDATE STUDENT PROFILE --------
+    if user.user_type == "student" and payload.student is not None:
+        sp_data = payload.student.dict()
+
+        if "portfolio_url" in sp_data:
+            sp_data["linkedin"] = sp_data.pop("portfolio_url")
+
+        sp, _ = StudentProfile.objects.get_or_create(user=user)
+        if apply_updates(sp, sp_data):
+            sp.save()
+
+    # -------- UPDATE PROFESSIONAL PROFILE --------
+    if user.user_type == "professional" and payload.professional is not None:
+        pp_data = payload.professional.dict()
+        pp, _ = ProfessionalProfile.objects.get_or_create(user=user)
+        if apply_updates(pp, pp_data):
+            pp.save()
+
+    # -------- RETURN JSON-SAFE DATA --------
+    out = user_to_out(user)  # your existing UserOut builder
+    # Ensure AnyUrl/HttpUrl are converted to plain strings
+    return out.model_dump(mode="json")

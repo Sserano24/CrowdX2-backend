@@ -177,3 +177,22 @@ class CampaignTeamMember(models.Model):
 
     class Meta:
         unique_together = ("campaign", "user")
+
+class CampaignLike(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="campaign_likes",
+    )
+    campaign = models.ForeignKey(
+        "Campaign",
+        on_delete=models.CASCADE,
+        related_name="like_objects",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "campaign")
+
+    def __str__(self):
+        return f"{self.user} → {self.campaign}"

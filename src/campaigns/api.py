@@ -196,6 +196,7 @@ def spotlight(request):
                 "title": c.title,
                 "description": (c.one_line or c.project_summary or "")[:160],
                 "cover_image": _imagefield_url(request, c.images.first().image if c.images.exists() else None),
+                "profile_pictuire":  _imagefield_url(request, c.creator.profile_image),
                 "creator_name": c.creator.get_full_name() or c.creator.username,
                 "school": c.school,
                 "current_amount": float(c.current_amount or 0),
@@ -203,6 +204,8 @@ def spotlight(request):
                 "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
 
                 "trending_score": float(c.trending_score or 0),
+                "likes": c.like_count,
+                "views": c.view_count,
             }
             for c in items
         ]
@@ -491,7 +494,7 @@ def search_campaigns(
         "page_size": page_obj.paginator.per_page,
     }
 
-@router.get("/detailed/{campaign_id}", response=CampaignSchema, auth=JWTAuth()) #Used for Campagin View individual projects page
+@router.get("/detailed/{campaign_id}", response=CampaignSchema, auth=JWTAuth())
 def get_campaign_detail(request, campaign_id: int):
     campaign = get_object_or_404(
         Campaign.objects
@@ -504,45 +507,53 @@ def get_campaign_detail(request, campaign_id: int):
         id=campaign_id,
     )
 
+    # increment views
     Campaign.objects.filter(id=campaign_id).update(views=F("views") + 1)
+
+    # ---------- Like status for this user ----------
+    user = request.auth  # or request.user, depending on JWTAuth
+    liked = False
+    if user and getattr(user, "is_authenticated", False):
+        liked = CampaignLike.objects.filter(
+            user=user,
+            campaign=campaign,
+        ).exists()
 
     # ---------- Creator ----------
     creator_user = campaign.creator
     student_profile0 = getattr(creator_user, "student_profile", None)
 
-    raw_tags = campaign.tags or "" 
+    raw_tags = campaign.tags or ""
     tags_list = [t.strip() for t in raw_tags.split(",") if t.strip()]
 
-    avatar_url = (
-        _imagefield_url(request, getattr(creator_user, "profile_picture", None))
-        or _abs_url(request, getattr(creator_user, "profile_url", None))
-        or None
+    creator_avatar = _imagefield_url(
+        request,
+        getattr(creator_user, "profile_image", None),
     )
 
     creator = CreatorSchema(
         id=creator_user.id,
         name=(creator_user.get_full_name() or creator_user.username or creator_user.email),
-        avatar=avatar_url or "",
+        avatar=creator_avatar or "",
+        bio=creator_user.bio,
         major=(getattr(student_profile0, "major", "") or ""),
         school=(getattr(student_profile0, "school", "") or ""),
-        linkedin=(
-            getattr(student_profile0, "linkedin", None)
-            or getattr(student_profile0, "portfolio_url", None)
-            or getattr(creator_user, "link", None)
-        ),
+        linkedin=(getattr(student_profile0, "linkedin", None)),
     )
 
     # ---------- Team members ----------
     team_members: list[TeamMemberSchema] = []
+
     if hasattr(campaign, "team_member_links"):
         for link in campaign.team_member_links.select_related("user").all():
             u = link.user
             sp = getattr(u, "student_profile", None)
-            avatar_tm = (
-                _imagefield_url(request, getattr(u, "profile_picture", None))
-                or _abs_url(request, getattr(u, "profile_url", None))
-                or None
+
+            tm_avatar = _imagefield_url(
+                request,
+                getattr(u, "profile_image", None),
             )
+
             team_members.append(
                 TeamMemberSchema(
                     id=u.id,
@@ -551,20 +562,20 @@ def get_campaign_detail(request, campaign_id: int):
                     bio=getattr(u, "bio", "") or "",
                     linkedin=(
                         getattr(sp, "linkedin", None)
-                        or getattr(sp, "portfolio_url", None)
                         or getattr(u, "link", None)
                     ),
-                    avatar=avatar_tm or "",
+                    avatar=tm_avatar or "",
                 )
             )
     elif hasattr(campaign, "team_members"):
         for tm in campaign.team_members.all():
             sp = getattr(tm, "student_profile", None)
-            avatar_tm = (
-                _imagefield_url(request, getattr(tm, "profile_picture", None))
-                or _abs_url(request, getattr(tm, "profile_url", None))
-                or None
+
+            tm_avatar = _imagefield_url(
+                request,
+                getattr(tm, "profile_image", None),
             )
+
             team_members.append(
                 TeamMemberSchema(
                     id=tm.id,
@@ -573,24 +584,23 @@ def get_campaign_detail(request, campaign_id: int):
                     bio=getattr(tm, "bio", "") or "",
                     linkedin=(
                         getattr(sp, "linkedin", None)
-                        or getattr(sp, "portfolio_url", None)
                         or getattr(tm, "link", None)
                     ),
-                    avatar=avatar_tm or "",
+                    avatar=tm_avatar or "",
                 )
             )
 
-    # ---------- Images (return URLs only to match CampaignSchema.images: list[str]) ----------
+    # ---------- Images ----------
     images = [
-    CampaignImageSchema(
-        id=img.id,
-        url=_image_url(request, img.image),
-        caption=img.caption or "",
-    )
-    for img in campaign.images.all().order_by("sort_order", "id")
-]
+        CampaignImageSchema(
+            id=img.id,
+            url=_image_url(request, img.image),
+            caption=img.caption or "",
+        )
+        for img in campaign.images.all().order_by("sort_order", "id")
+    ]
 
-    # ----- Contact info -----
+    # ---------- Contact ----------
     contact = ContactSchema(
         email=getattr(campaign, "contact_email", None) or creator_user.email,
         github=getattr(campaign, "contact_github", None),
@@ -622,7 +632,7 @@ def get_campaign_detail(request, campaign_id: int):
         goal_amount=int(campaign.goal_amount or 0),
         current_amount=int(getattr(campaign, "current_amount", 0) or 0),
         tags=tags_list,
-        images=images,  # <<< now list[str], matches schema
+        images=images,
         creator=creator,
         team_members=team_members,
         is_sponsored=campaign.is_sponsored,
@@ -632,22 +642,71 @@ def get_campaign_detail(request, campaign_id: int):
         milestones=milestones,
         verified=getattr(campaign, "verified", False),
         contact=contact,
+        liked=liked,  # 👈 NEW
     )
 
 
+@router.post(
+    "/{campaign_id}/like",
+    response=LikeStatusSchema,
+    auth=JWTAuth(),
+)
+def like_campaign(request, campaign_id: int):
+    user = request.auth
+    if not user or not user.is_authenticated:
+        # With JWTAuth this should rarely happen, but just in case:
+        from ninja.errors import HttpError
+        raise HttpError(401, "Authentication required")
+
+    campaign = get_object_or_404(Campaign, id=campaign_id)
+
+    # get_or_create makes it idempotent
+    like_obj, created = CampaignLike.objects.get_or_create(
+        user=user,
+        campaign=campaign,
+    )
+
+    if created:
+        # increment counter safely in DB
+        Campaign.objects.filter(id=campaign_id).update(
+            likes=F("likes") + 1
+        )
+        campaign.refresh_from_db(fields=["likes"])
+
+    return LikeStatusSchema(
+        liked=True,
+        like_count=int(getattr(campaign, "likes", 0) or 0),
+    )
 
 
+@router.delete(
+    "/{campaign_id}/like",
+    response=LikeStatusSchema,
+    auth=JWTAuth(),
+)
+def unlike_campaign(request, campaign_id: int):
+    user = request.auth
+    if not user or not user.is_authenticated:
+        from ninja.errors import HttpError
+        raise HttpError(401, "Authentication required")
 
+    campaign = get_object_or_404(Campaign, id=campaign_id)
 
+    deleted, _ = CampaignLike.objects.filter(
+        user=user,
+        campaign=campaign,
+    ).delete()
 
+    if deleted:
+        # decrement but never go negative
+        Campaign.objects.filter(
+            id=campaign_id,
+            likes__gt=0,
+        ).update(likes=F("likes") - 1)
 
+        campaign.refresh_from_db(fields=["likes"])
 
-
-
-
-
-
-
-
-
-
+    return LikeStatusSchema(
+        liked=False,
+        like_count=int(getattr(campaign, "likes", 0) or 0),
+    )

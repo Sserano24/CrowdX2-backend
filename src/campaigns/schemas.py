@@ -165,6 +165,8 @@ class CreatorSchema(BaseModel):
     avatar: Optional[str]
     major: Optional[str]
     school: Optional[str]
+    bio: str
+    linkedin:str
 
 
 class TeamMemberSchema(Schema):
@@ -197,6 +199,7 @@ class CampaignSchema(Schema):
     id: int
     title: str
     like_count: int
+    liked: bool | None = None 
     school: Optional[str] = None
     one_line: str
     project_summary: str
@@ -294,3 +297,8 @@ class ProjectCardSchema(BaseModel):
     featured: bool = False
     trending: bool = False
     creator: CreatorSchema
+
+
+class LikeStatusSchema(Schema):
+    liked: bool
+    like_count: int
