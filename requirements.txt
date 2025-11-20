@@ -17,10 +17,7 @@ rav
 mssql-django
 pyodbc
 dj-database-url
-<<<<<<< Updated upstream
 django-storages[azure]
-=======
 paypalrestsdk
 django-storages
 azure-storage-blob
->>>>>>> Stashed changes
