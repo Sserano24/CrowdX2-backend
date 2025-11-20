@@ -1,82 +1,86 @@
-import stripe
+import requests
+import json
 from django.conf import settings
 
-stripe.api_key = settings.STRIPE_SECRET_KEY
-
-def create_stripe_checkout(amount: float, campaign_id: int) -> str:
-    amount_cents = int(amount * 100)
-    session = stripe.checkout.Session.create(
-        payment_method_types=['card'],
-        line_items=[{
-            'price_data': {
-                'currency': 'usd',
-                'unit_amount': amount_cents,
-                'product_data': {
-                    'name': 'CrowdX Campaign Contribution'
-                },
-            },
-            'quantity': 1,
-        }],
-        mode='payment',
-        success_url=f"http://localhost:3000/success?campaign_id={campaign_id}",  # ✅ dynamic
-        cancel_url=f'http://localhost:3000/cancel?campaign_id={campaign_id}',    # ✅ dynamic
-        metadata={
-            'campaign_id': str(campaign_id)
-        }
+def get_paypal_access_token():
+    """Fetch OAuth token from PayPal."""
+    url = f"{settings.PAYPAL_API_BASE}/v1/oauth2/token"
+    response = requests.post(
+        url,
+        headers={"Accept": "application/json", "Accept-Language": "en_US"},
+        data={"grant_type": "client_credentials"},
+        auth=(settings.PAYPAL_CLIENT_ID, settings.PAYPAL_CLIENT_SECRET),
     )
-    return session.url
-
-from channels.layers import get_channel_layer
-from asgiref.sync import async_to_sync
-
-def broadcast_campaign_update(campaign_id: int, data: dict):
-    """
-    Broadcasts campaign donation updates over WebSocket.
-    """
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f'campaign_{campaign_id}',
-        {
-            'type': 'send_update',
-            'data': data
-        }
-    )
+    response.raise_for_status()
+    return response.json()["access_token"]
 
 
-from django.db import transaction
-from django.urls import reverse
-from django.conf import settings
-from .stripe_client import stripe
-from .models import StripeConnectedAccount
-
-@transaction.atomic
-def get_or_create_connect_account(user, email: str | None = None) -> StripeConnectedAccount:
-    acct = StripeConnectedAccount.objects.filter(user=user).first()
-    if acct:
-        return acct
-
-    account = stripe.Account.create(
-        country="US",
-        email=email or getattr(user, "email", None),
-        controller={
-            "fees": {"payer": "application"},          # your platform pays fees
-            "losses": {"payments": "application"},
-            "stripe_dashboard": {"type": "express"},   # Express accounts
+def create_paypal_order(amount):
+    """Create an order with PayPal."""
+    access_token = get_paypal_access_token()
+    url = f"{settings.PAYPAL_API_BASE}/v2/checkout/orders"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+    data = {
+        "intent": "CAPTURE",
+        "purchase_units": [
+            {
+                "amount": {"currency_code": "USD", "value": str(amount)},
+            }
+        ],
+        "application_context": {
+            "brand_name": "CrowdX Sandbox",
+            # 👇 this redirect auto-closes the popup
+            "return_url": "http://127.0.0.1:8001/api/payments/paypal/success",
+            "cancel_url": "http://127.0.0.1:8001/api/payments/paypal/cancel",
         },
-    )
-    return StripeConnectedAccount.objects.create(
-        user=user, account_id=account["id"],
-        details_submitted=account.get("details_submitted", False),
-        payouts_enabled=account.get("payouts_enabled", False),
-    )
+    }
 
-def create_onboarding_link(account_id: str, request) -> str:
-    refresh_url = request.build_absolute_uri(reverse("stripe-onboard-refresh"))
-    return_url  = request.build_absolute_uri(reverse("stripe-onboard-return"))
-    link = stripe.AccountLink.create(
-        account=account_id,
-        refresh_url=refresh_url,
-        return_url=return_url,
-        type="account_onboarding",
-    )
-    return link["url"]
+    response = requests.post(url, json=data, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+
+def capture_paypal_order(order_id):
+    """Capture an existing PayPal order after user approval."""
+    access_token = get_paypal_access_token()
+    url = f"{settings.PAYPAL_API_BASE}/v2/checkout/orders/{order_id}/capture"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+
+    response = requests.post(url, headers=headers)
+    response.raise_for_status()
+    return response.json()
+
+
+def verify_paypal_webhook(request):
+    """Verify webhook came from PayPal."""
+    try:
+        auth_token = get_paypal_access_token()
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {auth_token}",
+        }
+        body = {
+            "auth_algo": request.headers.get("PAYPAL-AUTH-ALGO"),
+            "cert_url": request.headers.get("PAYPAL-CERT-URL"),
+            "transmission_id": request.headers.get("PAYPAL-TRANSMISSION-ID"),
+            "transmission_sig": request.headers.get("PAYPAL-TRANSMISSION-SIG"),
+            "transmission_time": request.headers.get("PAYPAL-TRANSMISSION-TIME"),
+            "webhook_id": settings.PAYPAL_WEBHOOK_ID,
+            "webhook_event": json.loads(request.body.decode("utf-8")),
+        }
+
+        resp = requests.post(
+            f"{settings.PAYPAL_API_BASE}/v1/notifications/verify-webhook-signature",
+            json=body,
+            headers=headers,
+        )
+        return resp.json().get("verification_status") == "SUCCESS"
+    except Exception as e:
+        print(f"Webhook verification error: {e}")
+        return False

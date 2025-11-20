@@ -1,10 +1,9 @@
 from django.urls import path
-from .views import create_checkout_session
-from django.shortcuts import render
+from . import api, webhooks
 
 urlpatterns = [
-    path('', lambda request: render(request, 'payments/index.html'), name='index'),
-    path('create-checkout-session/', create_checkout_session, name='create-checkout-session'),  # ✅ use your function here
-    path('success/', lambda request: render(request, 'payments/success.html'), name='success'),
-    path('cancel/', lambda request: render(request, 'payments/cancel.html'), name='cancel'),
+    path("paypal/create-order", api.create_paypal_order, name="create_order"),
+    path("paypal/capture-order", api.capture_paypal_order, name="capture_order"),
+    path("webhook/", webhooks.paypal_webhook, name="paypal_webhook"),
 ]
+

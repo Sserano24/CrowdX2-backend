@@ -122,11 +122,11 @@ TEMPLATES = [
     },
 ]
 
-# === Stripe ===
-STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
-STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
-STRIPE_API_VERSION = os.getenv("STRIPE_API_VERSION", "")
-STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+# === Paypal ===
+PAYPAL_CLIENT_ID = os.getenv("PAYPAL_CLIENT_ID", "")
+PAYPAL_CLIENT_SECRET = os.getenv("PAYPAL_CLIENT_SECRET", "")
+PAYPAL_API_BASE = os.getenv("PAYPAL_API_BASE", "")
+PAYPAL_WEBHOOK_ID = os.getenv("PAYPAL_WEBHOOK_ID", "")
 
 # === Channels ===
 CHANNEL_LAYERS = {

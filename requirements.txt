@@ -8,7 +8,6 @@ channels
 daphne
 Pillow
 celery
-stripe
 dj-database-url
 python-dotenv
 psycopg2-binary
@@ -18,4 +17,10 @@ rav
 mssql-django
 pyodbc
 dj-database-url
+<<<<<<< Updated upstream
 django-storages[azure]
+=======
+paypalrestsdk
+django-storages
+azure-storage-blob
+>>>>>>> Stashed changes

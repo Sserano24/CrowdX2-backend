@@ -3,19 +3,24 @@ from campaigns.models import Campaign
 from django.conf import settings
 
 
-
 class Transaction(models.Model):
+    PAYMENT_METHODS = [
+        ('paypal', 'PayPal'),
+        ('manual', 'Manual'),
+    ]
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('completed', 'Completed'),
+        ('failed', 'Failed'),
+    ]
+
     campaign = models.ForeignKey(Campaign, on_delete=models.CASCADE, related_name='transactions')
     amount = models.FloatField()
-    stripe_session_id = models.CharField(max_length=255, unique=True)
+    payment_method = models.CharField(max_length=20, choices=PAYMENT_METHODS, default='paypal')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Failed')
+    paypal_order_id = models.CharField(max_length=255, blank=True, null=True)  # Track PayPal order IDs
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"${self.amount} to Campaign {self.campaign.id} on {self.created_at}"
-
-class StripeConnectedAccount(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
-    account_id = models.CharField(max_length=64, unique=True)
-    details_submitted = models.BooleanField(default=False)
-    payouts_enabled = models.BooleanField(default=False)
-    created_at = models.DateTimeField(auto_now_add=True)
+        return f"${self.amount} via {self.payment_method} for Campaign {self.campaign.id}"
