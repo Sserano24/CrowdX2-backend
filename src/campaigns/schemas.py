@@ -203,6 +203,7 @@ class CampaignSchema(Schema):
     school: Optional[str] = None
     one_line: str
     project_summary: str
+    is_creator_viewing: bool  # 👈 ADD THIS
 
     problem_statement: str
     proposed_solution: str
@@ -265,15 +266,15 @@ class CampaignCreateSchema(Schema):
     crypto_funding_allowed: bool
     use_creator_fiat_payout: bool
     use_creator_crypto_payout: bool
-    crypto_payout_address: str
-    fiat_payout_details: str
+    crypto_payout_address: Optional[str] = None
+    fiat_payout_details: Optional[str] = None
 
-    tags: List[str]
+    tags: List[str] | None = None
 
     team_members: List[TeamMemberIn] = []
 
     is_sponsored: bool
-    sponsored_by: str
+    sponsored_by: Optional[str] = None
 
     start_date: Optional[date] = None
     end_date: Optional[date] = None

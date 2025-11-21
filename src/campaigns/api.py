@@ -108,7 +108,7 @@ def create_campaign(request, payload: CampaignCreateSchema):
         fiat_payout_details=fiat_payout_details,
         crypto_payout_address=crypto_payout_address,
 
-        tags = ", ".join(payload.tags),
+        tags = ", ".join(payload.tags) if payload.tags else "",
 
         is_sponsored=payload.is_sponsored,
         sponsored_by=payload.sponsored_by or "",
@@ -165,6 +165,31 @@ def upload_campaign_image(
         "caption": img.caption,
     }
 
+@router.delete("/{campaign_id}/images/{image_id}", auth=JWTAuth())
+def delete_campaign_image(request, campaign_id: int, image_id: int):
+    """
+    Delete a single image from a campaign.
+    Only the campaign creator is allowed to delete.
+    """
+    campaign = get_object_or_404(Campaign, id=campaign_id)
+
+    # Optional: only allow owner
+    if campaign.creator_id != request.user.id:
+        return 403, {"detail": "Not allowed to modify this campaign"}
+
+    img = get_object_or_404(
+        CampaignImage,
+        id=image_id,
+        campaign_id=campaign_id,
+    )
+
+    # Optional: remove the file from storage (Azure) as well
+    if img.image:
+        img.image.delete(save=False)
+
+    img.delete()
+
+    return {"detail": "Image deleted", "id": image_id}
 
 #stats for homepage
 @router.get("/stats", response=StatsOut, auth=None) #Used for Homepage stats
@@ -204,8 +229,8 @@ def spotlight(request):
                 "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
 
                 "trending_score": float(c.trending_score or 0),
-                "likes": c.like_count,
-                "views": c.view_count,
+                "likes": int(getattr(c, "likes", 0) or 0),
+                "views": int(getattr(c, "views", 0) or 0),  
             }
             for c in items
         ]
@@ -512,6 +537,8 @@ def get_campaign_detail(request, campaign_id: int):
 
     # ---------- Like status for this user ----------
     user = request.auth  # or request.user, depending on JWTAuth
+    is_creator_viewing = bool(user and user.is_authenticated and user.id == campaign.creator_id)
+
     liked = False
     if user and getattr(user, "is_authenticated", False):
         liked = CampaignLike.objects.filter(
@@ -643,7 +670,102 @@ def get_campaign_detail(request, campaign_id: int):
         verified=getattr(campaign, "verified", False),
         contact=contact,
         liked=liked,  # 👈 NEW
+        is_creator_viewing=is_creator_viewing,  # 👈 NEW FIELD
+
     )
+
+@router.put("/editcampaign/{campaign_id}", response=CampaignSchema, auth=JWTAuth())
+@transaction.atomic
+def update_campaign_detail(
+    request,
+    campaign_id: int,
+    payload: CampaignCreateSchema,
+):
+    user = request.auth
+    if not user or not getattr(user, "is_authenticated", False):
+        raise HttpError(401, "Authentication required")
+
+    # Only allow the creator to edit this campaign
+    campaign = get_object_or_404(
+        Campaign.objects.select_related("creator"),
+        id=campaign_id,
+        creator=user,
+    )
+
+    # ---------- Basic fields ----------
+    campaign.title = payload.title.strip()
+    campaign.one_line = payload.one_line.strip()
+    campaign.project_summary = payload.project_summary.strip()
+    campaign.problem_statement = payload.problem_statement.strip()
+    campaign.proposed_solution = payload.proposed_solution.strip()
+    campaign.technical_approach = payload.technical_approach.strip()
+    campaign.implementation_progress = payload.implementation_progress.strip()
+    campaign.impact_and_future_work = payload.impact_and_future_work.strip()
+    campaign.mentorship_or_support_needs = (
+        payload.mentorship_or_support_needs.strip()
+    )
+
+    campaign.goal_amount = payload.goal_amount
+    campaign.fiat_funding_allowed = payload.fiat_funding_allowed
+    campaign.crypto_funding_allowed = payload.crypto_funding_allowed
+    campaign.use_creator_fiat_payout = payload.use_creator_fiat_payout
+    campaign.use_creator_crypto_payout = payload.use_creator_crypto_payout
+    campaign.crypto_payout_address = payload.crypto_payout_address.strip()
+    campaign.fiat_payout_details = payload.fiat_payout_details.strip()
+
+    # tags: List[str] | None  → CharField (no NULL)
+    campaign.tags = ", ".join(payload.tags or [])
+
+    campaign.is_sponsored = payload.is_sponsored
+    campaign.sponsored_by = (
+        payload.sponsored_by.strip() if payload.sponsored_by else ""
+    )
+
+    campaign.start_date = payload.start_date
+    campaign.end_date = payload.end_date
+
+    # ---------- Contact ----------
+    if payload.contact:
+      campaign.contact_email = payload.contact.email or ""
+      campaign.contact_github = payload.contact.github or ""
+      campaign.contact_youtube = payload.contact.youtube or ""
+
+    campaign.save()
+
+    # ---------- Milestones ----------
+    campaign.milestones.all().delete()
+    if payload.milestones:
+        CampaignMilestone.objects.bulk_create(
+            [
+                CampaignMilestone(
+                    campaign=campaign,
+                    title=m.title.strip(),
+                    status=m.status,
+                    details=(m.details or "").strip(),
+                    milestone_goal=m.milestone_goal,
+                )
+                for m in payload.milestones
+            ]
+        )
+
+    # ---------- Team members via CampaignTeamMember ----------
+    # related_name="team_member_links" on CampaignTeamMember.campaign
+    campaign.team_member_links.all().delete()
+    if payload.team_members:
+        CampaignTeamMember.objects.bulk_create(
+            [
+                CampaignTeamMember(
+                    campaign=campaign,
+                    user_id=tm.id,
+                    role=(tm.role or "").strip(),
+                )
+                for tm in payload.team_members
+            ]
+        )
+
+    # ---------- Return updated detail ----------
+    # NOTE: get_campaign_detail() increments views by 1.
+    return get_campaign_detail(request, campaign_id)
 
 
 @router.post(
