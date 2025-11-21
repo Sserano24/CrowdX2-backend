@@ -9,6 +9,7 @@ from django.conf.urls.static import static
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/", api.urls),  # TEMP disabled
+    path("api/payments/paypal/webhook", paypal_webhook),
     path("api/payments/paypal/webhook/", paypal_webhook),
     path("api/payments/", include("payments.urls")),
 ]
