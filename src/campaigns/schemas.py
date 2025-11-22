@@ -165,7 +165,7 @@ class CreatorSchema(BaseModel):
     avatar: Optional[str]
     major: Optional[str]
     school: Optional[str]
-    bio: str
+    bio: Optional[str] = None
     linkedin:str
 
 
@@ -185,7 +185,7 @@ class MilestoneSchema(Schema):
 
 
 class ContactSchema(Schema):
-    email: str
+    email: Optional[str] = None
     github: Optional[str] = None
     youtube: Optional[str] = None
 

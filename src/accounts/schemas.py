@@ -1,25 +1,26 @@
-from typing import Optional, List, Literal
+from typing import Optional, List
 from ninja import Schema
 from typing import List
 from decimal import Decimal
 from pydantic import BaseModel, AnyUrl, EmailStr
 
 
-UserType = Literal["student", "professional"]
+# UserType = Literal["student", "professional"]
 
 class StudentProfileIn(Schema):
     school: str
-    major: Optional[str] = None
-    graduation_year: Optional[int] = None
-    gpa: Optional[Decimal] = None
-    portfolio_url: Optional[str] = None
+    major: str
+    graduation_year: int
+    gpa: Optional[float] = None             
+    linkedin_url: Optional[str] = None      
+
 
 class ProfessionalProfileIn(Schema):
     company: str
-    title: Optional[str] = None
-    linkedin_url: Optional[str] = None
-    hiring: Optional[bool] = False
-    interests: Optional[str] = None  # comma-separated
+    title: str
+    linkedin_url: Optional[str] = None      
+    hiring: bool = False                   
+    interests: Optional[str] = None         
 
 class UserBase(Schema):
     email: str
@@ -30,15 +31,24 @@ class UserBase(Schema):
     bio: Optional[str] = None
     link: Optional[str] = None
     wallet_address: Optional[str] = None
-    user_type: UserType
+    user_type: str  
 
-class RegisterUser(UserBase):
+
+class RegisterUser(Schema):
+    email: EmailStr
+    username: str
     password: str
-    profile_image: Optional[str] = None
+    first_name: str
+    last_name: str
+    phone_number: Optional[str] = None
+    bio: Optional[str] = None
+    wallet_address: Optional[str] = None
+    link: Optional[str] = None
+    user_type: str
 
-    # nested profile data (exactly one required based on user_type)
     student: Optional[StudentProfileIn] = None
     professional: Optional[ProfessionalProfileIn] = None
+
 
 # For partial updates (PUT/PATCH)
 class UserUpdate(Schema):
@@ -50,18 +60,19 @@ class UserUpdate(Schema):
     wallet_address: Optional[str] = None
     blurb: Optional[str] = None
 
-class StudentProfileOut(BaseModel):
+class StudentProfileOut(Schema):
     school: str
-    major: Optional[str] = None
-    graduation_year: Optional[int] = None
+    major: str
+    graduation_year: int
     gpa: Optional[float] = None
-    portfolio_url: Optional[AnyUrl] = None
+    linkedin: Optional[str] = None
 
-class ProfessionalProfileOut(BaseModel):
+
+class ProfessionalProfileOut(Schema):
     company: str
-    title: Optional[str] = None
-    linkedin_url: Optional[AnyUrl] = None
-    hiring: bool = False
+    title: str
+    linkedin_url: Optional[str] = None
+    hiring: bool
     interests: Optional[str] = None
 
 
@@ -81,7 +92,7 @@ class UserOut(BaseModel):
     associated_projects: List[str] = []  # or List[ProjectOut] = []
     phone_number: Optional[str] = None
     bio: Optional[str] = None
-    link: Optional[AnyUrl] = None
+    link: Optional[str] = None
     wallet_address: Optional[str] = None
     user_type: str
     blurb: Optional[str] = None

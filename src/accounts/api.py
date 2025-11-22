@@ -3,7 +3,7 @@ from typing import List
 from django.contrib.auth import get_user_model
 from django.db import transaction, IntegrityError, models
 from django.shortcuts import get_object_or_404
-from ninja import Router, Schema, File
+from ninja import Router, Schema, File, Form
 from ninja.files import UploadedFile
 from django.utils.text import slugify
 from django.conf import settings
@@ -12,6 +12,7 @@ from ninja_jwt.authentication import JWTAuth
 from django.core.exceptions import ObjectDoesNotExist
 from datetime import timedelta
 
+import json   
 
 from .schemas import *
 from .models import  StudentProfile, ProfessionalProfile, UserType as UserTypeEnum  # enum from your models
@@ -77,7 +78,7 @@ def user_to_out(u) -> UserOut:
         data["professional"] = ProfessionalProfileOut(
             company=pp.company,
             title=pp.title,
-            linkedin_url=pp.linkedin_url or None,
+            linkedin_url=pp.linkedin or None,
             hiring=pp.hiring,
             interests=pp.interests,
         )
@@ -94,8 +95,56 @@ def user_to_out(u) -> UserOut:
 
 @router.post("/register", response=UserOut)
 @transaction.atomic
-def register(request, payload: RegisterUser):
-    # 1) Validate user_type + nested payloads (unchanged)
+def register(
+    request,
+    # -------- core user fields (form-data) --------
+    email: str = Form(...),
+    username: str = Form(...),
+    password: str = Form(...),
+    first_name: str = Form(...),
+    last_name: str = Form(...),
+    phone_number: Optional[str] = Form(None),
+    bio: Optional[str] = Form(None),
+    wallet_address: Optional[str] = Form(None),
+    link: Optional[str] = Form(None),
+    user_type: str = Form(...),
+
+    # nested profiles come as JSON strings in the form
+    student: Optional[str] = Form(None),       # JSON string or null
+    professional: Optional[str] = Form(None),  # JSON string or null
+
+    # file upload
+    profile_image: UploadedFile = File(None),
+):
+    # ---------- Rebuild nested schemas manually ----------
+    student_obj: Optional[StudentProfileIn] = None
+    professional_obj: Optional[ProfessionalProfileIn] = None
+
+    if student:
+        student_data = json.loads(student)
+        student_obj = StudentProfileIn(**student_data)
+
+    if professional:
+        professional_data = json.loads(professional)
+        professional_obj = ProfessionalProfileIn(**professional_data)
+
+    # Build a RegisterUser instance from the flat fields
+    payload = RegisterUser(
+        email=email,
+        username=username,
+        password=password,
+        first_name=first_name,
+        last_name=last_name,
+        phone_number=phone_number,
+        bio=bio,
+        wallet_address=wallet_address,
+        link=link,
+        user_type=user_type,
+        student=student_obj,
+        professional=professional_obj,
+    )
+
+    # ---------- From here down, it's your original logic ----------
     if payload.user_type not in ("student", "professional"):
         raise HttpError(400, "user_type must be 'student' or 'professional'")
 
@@ -104,9 +153,6 @@ def register(request, payload: RegisterUser):
     if payload.user_type == "professional" and not payload.professional:
         raise HttpError(400, "professional payload required for user_type=professional")
 
-    # ----------------------------------------------------
-    # 2) Try to find existing user by email
-    # ----------------------------------------------------
     try:
         u = User.objects.get(email=payload.email)
         existing_by_email = True
@@ -114,35 +160,20 @@ def register(request, payload: RegisterUser):
         u = None
         existing_by_email = False
 
-    # ----------------------------------------------------
-    # 3) Existing email found → ONLY allow upgrading guests
-    # ----------------------------------------------------
     if existing_by_email:
-
-        # ❌ If user is not a guest, block registration
         if u.user_type != UserTypeEnum.GUEST:
-            raise HttpError(
-                400,
-                "Email already registered. Please log in instead."
-            )
+            raise HttpError(400, "Email already registered. Please log in instead.")
 
-        # ✅ Safe to upgrade guest → check for username conflicts
         if payload.username and payload.username != u.username:
             if User.objects.filter(username=payload.username).exclude(pk=u.pk).exists():
                 raise HttpError(400, "User with this username already exists.")
             u.username = payload.username
 
-        # Update core fields (convert guest → real account)
         u.first_name = payload.first_name
         u.last_name = payload.last_name
         u.phone_number = payload.phone_number
-        u.set_password(payload.password)   # guest → real password
-
+        u.set_password(payload.password)
     else:
-        # ----------------------------------------------------
-        # 4) Brand-new user creation
-        # ----------------------------------------------------
-        # Ensure username uniqueness BEFORE hitting DB
         if User.objects.filter(username=payload.username).exists():
             raise HttpError(400, "User with this username already exists.")
 
@@ -158,22 +189,19 @@ def register(request, payload: RegisterUser):
         except IntegrityError:
             raise HttpError(400, "User with this email/username already exists.")
 
-    # ----------------------------------------------------
-    # 5) Set universal user fields
-    # ----------------------------------------------------
+    # universal fields
     u.user_type = payload.user_type
     u.bio = payload.bio
     u.link = payload.link
     u.wallet_address = payload.wallet_address
 
-    if getattr(payload, "profile_image", None):
-        u.profile_image = payload.profile_image
+    # save profile image if present
+    if profile_image:
+        u.profile_image.save(profile_image.name, profile_image, save=True)
 
     u.save()
 
-    # ----------------------------------------------------
-    # 6) Create / update profile based on account type
-    # ----------------------------------------------------
+    # profiles
     if payload.user_type == "student":
         from .models import StudentProfile
         sp = payload.student
@@ -185,7 +213,7 @@ def register(request, payload: RegisterUser):
                 "major": sp.major or "",
                 "graduation_year": sp.graduation_year,
                 "gpa": sp.gpa,
-                "linkedin": sp.portfolio_url or "",
+                "linkedin": sp.linkedin_url or "",
             },
         )
     else:
@@ -197,13 +225,15 @@ def register(request, payload: RegisterUser):
             defaults={
                 "company": pp.company,
                 "title": pp.title or "",
-                "linkedin_url": pp.linkedin_url or "",
+                "linkedin": pp.linkedin_url or "",
                 "hiring": bool(pp.hiring) if pp.hiring is not None else False,
                 "interests": pp.interests or "",
             },
         )
 
     return user_to_out(u)
+
+
 
 @router.post("/profile/avatar", auth=JWTAuth())
 def upload_avatar(request, file: UploadedFile = File(...)):
