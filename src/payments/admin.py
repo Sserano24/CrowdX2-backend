@@ -1,5 +1,6 @@
 from django.contrib import admin
 from .models import Transaction
+from .models import Payout
 
 
 @admin.register(Transaction)
@@ -35,3 +36,34 @@ class TransactionAdmin(admin.ModelAdmin):
         return f"${obj.net_amount:.2f}" if obj.net_amount else "-"
     net_label.short_description = "Net Amount"
 
+@admin.register(Payout)
+class PayoutAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "campaign",
+        "gross_amount",
+        "payout_fee",
+        "net_amount",
+        "status",
+        "paypal_batch_id",
+        "created_at",
+        "completed_at",
+    )
+    list_filter = ("status", "created_at")
+    search_fields = ("campaign__title", "paypal_batch_id")
+    readonly_fields = ("created_at", "completed_at")
+
+    fieldsets = (
+        (None, {
+            "fields": (
+                "campaign",
+                "gross_amount",
+                "payout_fee",
+                "net_amount",
+                "status",
+                "paypal_batch_id",
+                "notes",
+            )
+        }),
+        ("Timestamps", {"fields": ("created_at", "completed_at")}),
+    )

@@ -84,3 +84,73 @@ def verify_paypal_webhook(request):
     except Exception as e:
         print(f"Webhook verification error: {e}")
         return False
+
+def send_paypal_payout(email, amount, note="Campaign payout"):
+    """Send PayPal payout to a recipient's email address, accounting for $0.25 fee."""
+    try:
+        # 1️⃣ Get access token
+        auth = (settings.PAYPAL_CLIENT_ID, settings.PAYPAL_CLIENT_SECRET)
+        token_res = requests.post(
+            f"{settings.PAYPAL_API_BASE}/v1/oauth2/token",
+            data={"grant_type": "client_credentials"},
+            auth=auth,
+        )
+        token_res.raise_for_status()
+        access_token = token_res.json()["access_token"]
+
+        # 2️⃣ Deduct PayPal payout transaction fee
+        payout_fee = 0.25
+        payout_amount = round(amount - payout_fee, 2)
+        if payout_amount <= 0:
+            return {
+                "success": False,
+                "error": f"Payout amount too low after ${payout_fee:.2f} PayPal fee deduction.",
+            }
+
+        # 3️⃣ Prepare request headers
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {access_token}",
+        }
+
+        # 4️⃣ Construct payout data
+        data = {
+            "sender_batch_header": {
+                "sender_batch_id": f"payout_{email}_{int(amount * 100)}",
+                "email_subject": "Your CrowdX campaign payout",
+            },
+            "items": [
+                {
+                    "recipient_type": "EMAIL",
+                    "amount": {"value": f"{payout_amount:.2f}", "currency": "USD"},
+                    "receiver": email,
+                    "note": (
+                        f"{note}. A $0.25 PayPal processing fee has been automatically deducted."
+                    ),
+                }
+            ],
+        }
+
+        # 5️⃣ Send payout request
+        res = requests.post(
+            f"{settings.PAYPAL_API_BASE}/v1/payments/payouts",
+            headers=headers,
+            json=data,
+        )
+        res.raise_for_status()
+        result = res.json()
+        batch_id = result.get("batch_header", {}).get("payout_batch_id")
+
+        print(f"✅ PayPal Payout Sent: {batch_id} (${payout_amount:.2f} sent to {email})")
+        return {
+            "success": True,
+            "batch_id": batch_id,
+            "response": result,
+            "gross_amount": amount,
+            "payout_fee": payout_fee,
+            "net_amount": payout_amount,
+        }
+
+    except Exception as e:
+        print("⚠️ PayPal Payout Error:", e)
+        return {"success": False, "error": str(e)}

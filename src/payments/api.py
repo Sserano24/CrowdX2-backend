@@ -71,13 +71,13 @@ def create_order(request, amount: float, campaign_id: int):
 
 @router.post("/paypal/capture-order")
 def capture_order(request, order_id: str):
-    """Capture an approved PayPal order and update database with fee + net."""
+    """Capture an approved PayPal order, update DB with fee/net, and trigger payout if goal met."""
     try:
-        # Capture the PayPal order
+        # 🟢 Step 1: Capture PayPal order
         data = capture_paypal_order(order_id)
         status = data.get("status", "")
 
-        # Extract breakdown info (PayPal fees, net, gross)
+        # 🟢 Step 2: Extract fee breakdown
         purchase_units = data.get("purchase_units", [])
         breakdown = {}
         if purchase_units:
@@ -90,7 +90,7 @@ def capture_order(request, order_id: str):
         fee_value = float(breakdown.get("paypal_fee", {}).get("value", 0))
         net_value = float(breakdown.get("net_amount", {}).get("value", 0))
 
-        # Update the transaction
+        # 🟢 Step 3: Update Transaction record
         from .models import Transaction
         tx = Transaction.objects.filter(paypal_order_id=order_id).first()
         if tx:
@@ -101,14 +101,37 @@ def capture_order(request, order_id: str):
             tx.net_amount = net_value
             tx.save()
 
-            # Update campaign amount raised with net amount
+            # 🟢 Step 4: Update Campaign total (with net amount)
             if status == "COMPLETED":
                 campaign = tx.campaign
                 campaign.current_amount = float(campaign.current_amount) + net_value
                 campaign.save()
 
+                # 🟢 Step 5: Trigger automatic payout if goal reached
+                if campaign.current_amount >= campaign.goal_amount:
+                    from .models import Payout
+                    from .services import send_paypal_payout
 
-        # ✅ Redirect response for frontend
+                    # prevent duplicate payouts
+                    if not Payout.objects.filter(campaign=campaign, status="completed").exists():
+                         from decimal import Decimal
+
+                         result = send_paypal_payout(campaign.fiat_payout_details, campaign.current_amount)
+                        # 🧮 Build payout record safely with new fields
+                         payout = Payout.objects.create(
+                            campaign=campaign,
+                            gross_amount=Decimal(result.get("gross_amount", campaign.current_amount)),
+                            payout_fee=Decimal(result.get("payout_fee", 0.25)),
+                            net_amount=Decimal(result.get("net_amount", max(campaign.current_amount - 0.25, 0))),
+                            paypal_batch_id=result.get("batch_id"),
+                            status="completed" if result.get("success") else "failed",
+                            notes=result.get("error") if not result.get("success") else None,
+                        )
+
+
+                    
+
+        # 🟢 Step 6: Redirect for frontend
         if status == "COMPLETED":
             return JsonResponse({"redirect": "/payment/success"})
         else:
@@ -289,6 +312,49 @@ def paypal_webhook(request):
         print("⚠️ Webhook error:", e)
         return JsonResponse({"error": str(e)}, status=400)
 
+@router.post("/paypal/payout")
+def create_payout(request, campaign_id: int):
+    """Trigger a PayPal payout for a campaign if eligible."""
+    from .models import Campaign, Payout
+
+    try:
+        campaign = Campaign.objects.get(id=campaign_id)
+
+        if campaign.amount_raised < campaign.goal_amount:
+            return JsonResponse({"error": "Campaign goal not reached yet."}, status=400)
+
+        if not campaign.fiat_payout_details:
+            return JsonResponse({"error": "No payout PayPal address set."}, status=400)
+
+        # Avoid duplicate payouts
+        if Payout.objects.filter(campaign=campaign, status="completed").exists():
+            return JsonResponse({"error": "Payout already completed."}, status=400)
+
+        amount = campaign.amount_raised  # net amount
+        payout = Payout.objects.create(
+            campaign=campaign,
+            amount=amount,
+            status="pending",
+        )
+
+        # Send payout via PayPal API
+        from .services import send_paypal_payout
+        result = send_paypal_payout(campaign.fiat_payout_details, amount)
+
+        if result["success"]:
+            payout.status = "completed"
+            payout.paypal_batch_id = result["batch_id"]
+            payout.save()
+            return JsonResponse({"status": "success", "batch_id": result["batch_id"]})
+        else:
+            payout.status = "failed"
+            payout.notes = result["error"]
+            payout.save()
+            return JsonResponse({"error": "Payout failed", "details": result["error"]}, status=400)
+
+    except Exception as e:
+        print("⚠️ Payout error:", e)
+        return JsonResponse({"error": str(e)}, status=400)
 
 
 
