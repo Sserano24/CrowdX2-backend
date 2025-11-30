@@ -11,6 +11,7 @@ from django.db.models import Prefetch
 from django.utils.dateparse import parse_date
 from django.db import transaction
 from django.db.models.functions import Coalesce, NullIf
+from django.db import IntegrityError
 
 
 from ninja.errors import HttpError
@@ -44,6 +45,72 @@ def _image_url(request, image_field) -> str:
     except Exception:
         return ""
     return str(request.build_absolute_uri(url))  # ensure plain str
+
+
+
+def _campaign_to_card(request, c: Campaign) -> dict:
+    """
+    Build the full project card dict used by the frontend.
+    Same structure as in student_campaigns.
+    """
+    # --- Images ---
+    image_urls = []
+    for img in c.images.all():
+        image_urls.append(_imagefield_url(request, img.image))
+
+    cover_url = (
+        _imagefield_url(request, c.images.first().image)
+        if c.images.exists()
+        else None
+    )
+
+    # --- Creator name ---
+    creator_name = (
+        c.creator.get_full_name().strip()
+        if c.creator.get_full_name()
+        else c.creator.username
+    )
+
+    # --- Days left ---
+    days_left = None
+    if getattr(c, "end_date", None):
+        delta = c.end_date - timezone.now().date()
+        days_left = max(delta.days, 0)
+
+    return {
+        "id": c.id,
+        "title": c.title,
+        "one_line": getattr(c, "one_line", None),
+        "blurb": getattr(c, "project_summary", None),
+
+        "cover_image": cover_url,
+        "images": [u for u in image_urls if u],
+
+        # tags as list (for ExploreProjectCard)
+        "tags": _csv_to_list(getattr(c, "tags", "")),
+
+        "likes": getattr(c, "likes", 0) or 0,
+        "views": getattr(c, "views", 0) or 0,
+        "comments": getattr(c, "comment_count", 0) or 0,
+
+        "featured": getattr(c, "featured", False) or False,
+        "trending": getattr(c, "trending", False) or False,
+
+        "creator": {
+            "id": getattr(c.creator, "id", None),
+            "name": creator_name,
+            "avatar": _image_url(request, getattr(c.creator, "profile_image", None)),
+            "major": getattr(c.creator, "major", None),
+            "school": getattr(c.creator, "school", None),
+        },
+
+        # --- Funding & extra metadata ---
+        "school": getattr(c, "school", None),
+        "current_amount": float(getattr(c, "current_amount", 0) or 0),
+        "goal_amount": float(getattr(c, "goal_amount", 0) or 0),
+        "backers": getattr(c, "backers", 0) or 0,
+        "days_left": days_left,
+    }
 
 
 User = get_user_model()
@@ -241,13 +308,11 @@ def spotlight(request):
 def student_campaigns(request, id: int):
     """
     Return all active campaigns for a specific student (public).
-
     Ordered by:
       - featured first
       - trending_score next
       - newest last
     """
-
     student = get_object_or_404(User, id=id, is_active=True)
 
     qs = (
@@ -257,70 +322,7 @@ def student_campaigns(request, id: int):
         .order_by("-featured", "-trending_score", "-created_at")
     )
 
-    items = []
-    for c in qs:
-        # --- Images ---
-        image_urls = []
-        for img in c.images.all():
-            image_urls.append(_imagefield_url(request, img.image))
-
-        cover_url = (
-            _imagefield_url(request, c.images.first().image)
-            if c.images.exists()
-            else None
-        )
-
-        # --- Creator name ---
-        creator_name = (
-            c.creator.get_full_name().strip()
-            if c.creator.get_full_name()
-            else c.creator.username
-        )
-
-        # --- Days left ---
-        days_left = None
-        if getattr(c, "end_date", None):
-            delta = c.end_date - timezone.now().date()
-            days_left = max(delta.days, 0)
-
-        # --- Build card dict (your exact structure) ---
-        item = {
-            "id": c.id,
-            "title": c.title,
-            "one_line": getattr(c, "one_line", None),
-            "blurb": getattr(c, "project_summary", None),
-
-            "cover_image": cover_url,
-            "images": [u for u in image_urls if u],
-
-            "tags": _csv_to_list(getattr(c, "tags", "")),
-
-            "likes": getattr(c, "likes", 0) or 0,
-            "views": getattr(c, "views", 0) or 0,
-            "comments": getattr(c, "comment_count", 0) or 0,
-
-            "featured": getattr(c, "featured", False) or False,
-            "trending": getattr(c, "trending", False) or False,
-
-            "creator": {
-                "id": getattr(c.creator, "id", None),
-                "name": creator_name,
-                "avatar": _image_url(request, getattr(c.creator, "profile_image", None)),
-                "major": getattr(c.creator, "major", None),
-                "school": getattr(c.creator, "school", None),
-            },
-
-            # --- Funding & extra metadata ---
-            "school": getattr(c, "school", None),
-            "current_amount": float(getattr(c, "current_amount", 0) or 0),
-            "goal_amount": float(getattr(c, "goal_amount", 0) or 0),
-            "backers": getattr(c, "backers", 0) or 0,
-            "days_left": days_left,
-        }
-
-        items.append(item)
-
-    return items
+    return [_campaign_to_card(request, c) for c in qs]
 
 
 
@@ -540,12 +542,19 @@ def get_campaign_detail(request, campaign_id: int):
     is_creator_viewing = bool(user and user.is_authenticated and user.id == campaign.creator_id)
 
     liked = False
+    saved = False
     if user and getattr(user, "is_authenticated", False):
         liked = CampaignLike.objects.filter(
             user=user,
             campaign=campaign,
         ).exists()
 
+        saved = SavedCampaign.objects.filter(
+            user=user,
+            campaign=campaign,
+        ).exists()
+
+    
     # ---------- Creator ----------
     creator_user = campaign.creator
     student_profile0 = getattr(creator_user, "student_profile", None)
@@ -671,6 +680,7 @@ def get_campaign_detail(request, campaign_id: int):
         contact=contact,
         liked=liked,  # 👈 NEW
         is_creator_viewing=is_creator_viewing,  # 👈 NEW FIELD
+         saved=saved,
 
     )
 
@@ -832,3 +842,55 @@ def unlike_campaign(request, campaign_id: int):
         liked=False,
         like_count=int(getattr(campaign, "likes", 0) or 0),
     )
+
+
+
+@router.post("/save/{campaign_id}/", response=SavedStatusSchema, auth=JWTAuth())
+def save_campaign(request, campaign_id: int):
+    user = request.auth
+    campaign = get_object_or_404(Campaign, id=campaign_id)
+
+    try:
+        SavedCampaign.objects.get_or_create(
+            user=user,
+            campaign=campaign,
+        )
+    except IntegrityError:
+        # already saved or some race condition
+        pass
+
+    return {"saved": True}
+
+
+# ---------- Unsave a campaign ----------
+@router.delete("/unsave/{campaign_id}", response=SavedStatusSchema, auth=JWTAuth())
+def unsave_campaign(request, campaign_id: int):
+    user = request.auth
+    campaign = get_object_or_404(Campaign, id=campaign_id)
+
+    SavedCampaign.objects.filter(
+        user=user,
+        campaign=campaign,
+    ).delete()
+
+    return {"saved": False}
+
+
+# ---------- List all saved campaigns for this user ----------
+@router.get("/listsaved", auth=JWTAuth())
+def list_saved_campaigns(request):
+    """
+    Return all campaigns the current user has saved,
+    with the same card structure as /student_campaigns.
+    """
+    user = request.auth
+
+    qs = (
+        Campaign.objects.filter(saved_by__user=user, is_active=True)
+        .select_related("creator")
+        .prefetch_related("images")
+        .order_by("-featured", "-trending_score", "-created_at")
+        .distinct()
+    )
+
+    return [_campaign_to_card(request, c) for c in qs]

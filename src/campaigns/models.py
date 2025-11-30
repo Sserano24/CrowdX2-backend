@@ -196,3 +196,25 @@ class CampaignLike(models.Model):
 
     def __str__(self):
         return f"{self.user} → {self.campaign}"
+    
+
+class SavedCampaign(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="saved_campaigns",
+    )
+    campaign = models.ForeignKey(
+        "campaigns.Campaign",
+        on_delete=models.CASCADE,
+        related_name="saved_by",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("user", "campaign")
+        verbose_name = "Saved campaign"
+        verbose_name_plural = "Saved campaigns"
+
+    def __str__(self):
+        return f"{self.user} saved {self.campaign}"

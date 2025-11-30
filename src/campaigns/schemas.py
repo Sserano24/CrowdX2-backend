@@ -231,6 +231,8 @@ class CampaignSchema(Schema):
 
     verified: bool
     contact: ContactSchema
+    saved: bool = False        # 👈 NEW
+
 
 class TeamMemberIn(Schema):
     id: int
@@ -303,3 +305,14 @@ class ProjectCardSchema(BaseModel):
 class LikeStatusSchema(Schema):
     liked: bool
     like_count: int
+
+
+
+class SavedStatusSchema(Schema):
+    saved: bool
+
+class SavedCampaignListItemSchema(Schema):
+    id: int
+    title: str
+    cover_image: Optional[str] = None
+    tags: Optional[str] = None  # or list[str] if you store tags as array

@@ -278,7 +278,7 @@ def recent_users(request):
         User.objects
         .filter(user_type="student")
         .select_related("student_profile")
-        .order_by("-id")[:4]
+        .order_by("-id")[:15]
     )
 
     items = []
