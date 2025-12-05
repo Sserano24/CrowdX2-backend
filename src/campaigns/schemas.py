@@ -175,6 +175,7 @@ class TeamMemberSchema(Schema):
     role: str
     bio: str
     linkedin: Optional[str] = None
+    avatar: Optional[str] = None
 
 
 class MilestoneSchema(Schema):
